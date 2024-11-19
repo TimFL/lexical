@@ -10,30 +10,31 @@ import type {Spread} from 'lexical';
 
 import {addClassNamesToElement} from '@lexical/utils';
 import {
+  $applyNodeReplacement,
   DOMConversionMap,
   DOMConversionOutput,
   EditorConfig,
-  GridRowNode,
+  ElementNode,
   LexicalNode,
   NodeKey,
   SerializedElementNode,
 } from 'lexical';
 
+import {PIXEL_VALUE_REG_EXP} from './constants';
+
 export type SerializedTableRowNode = Spread<
   {
-    height: number;
-    type: 'tablerow';
-    version: 1;
+    height?: number;
   },
   SerializedElementNode
 >;
 
 /** @noInheritDoc */
-export class TableRowNode extends GridRowNode {
+export class TableRowNode extends ElementNode {
   /** @internal */
   __height?: number;
 
-  static getType(): 'tablerow' {
+  static getType(): string {
     return 'tablerow';
   }
 
@@ -44,7 +45,7 @@ export class TableRowNode extends GridRowNode {
   static importDOM(): DOMConversionMap | null {
     return {
       tr: (node: Node) => ({
-        conversion: convertTableRowElement,
+        conversion: $convertTableRowElement,
         priority: 0,
       }),
     };
@@ -59,9 +60,10 @@ export class TableRowNode extends GridRowNode {
     this.__height = height;
   }
 
-  exportJSON(): SerializedElementNode {
+  exportJSON(): SerializedTableRowNode {
     return {
       ...super.exportJSON(),
+      ...(this.getHeight() && {height: this.getHeight()}),
       type: 'tablerow',
       version: 1,
     };
@@ -79,13 +81,17 @@ export class TableRowNode extends GridRowNode {
     return element;
   }
 
+  isShadowRoot(): boolean {
+    return true;
+  }
+
   setHeight(height: number): number | null | undefined {
     const self = this.getWritable();
     self.__height = height;
     return this.__height;
   }
 
-  getHeight(): number | null | undefined {
+  getHeight(): number | undefined {
     return this.getLatest().__height;
   }
 
@@ -102,12 +108,19 @@ export class TableRowNode extends GridRowNode {
   }
 }
 
-export function convertTableRowElement(domNode: Node): DOMConversionOutput {
-  return {node: $createTableRowNode()};
+export function $convertTableRowElement(domNode: Node): DOMConversionOutput {
+  const domNode_ = domNode as HTMLTableCellElement;
+  let height: number | undefined = undefined;
+
+  if (PIXEL_VALUE_REG_EXP.test(domNode_.style.height)) {
+    height = parseFloat(domNode_.style.height);
+  }
+
+  return {node: $createTableRowNode(height)};
 }
 
 export function $createTableRowNode(height?: number): TableRowNode {
-  return new TableRowNode(height);
+  return $applyNodeReplacement(new TableRowNode(height));
 }
 
 export function $isTableRowNode(

@@ -7,22 +7,27 @@
  */
 
 import type {LexicalComposerContextType} from '@lexical/react/LexicalComposerContext';
-import type {Klass} from 'lexical';
 
 import {
   createLexicalComposerContext,
   LexicalComposerContext,
 } from '@lexical/react/LexicalComposerContext';
 import {
+  $createParagraphNode,
   $getRoot,
+  $getSelection,
   createEditor,
   EditorState,
   EditorThemeClasses,
+  HTMLConfig,
+  Klass,
   LexicalEditor,
   LexicalNode,
+  LexicalNodeReplacement,
 } from 'lexical';
 import {useMemo} from 'react';
 import * as React from 'react';
+import {CAN_USE_DOM} from 'shared/canUseDOM';
 import useLayoutEffect from 'shared/useLayoutEffect';
 
 const HISTORY_MERGE_OPTIONS = {tag: 'history-merge'};
@@ -33,18 +38,19 @@ export type InitialEditorStateType =
   | EditorState
   | ((editor: LexicalEditor) => void);
 
-type Props = {
-  children: JSX.Element | string | (JSX.Element | string)[];
-  initialConfig: Readonly<{
-    editor__DEPRECATED?: LexicalEditor | null;
-    namespace: string;
-    nodes?: ReadonlyArray<Klass<LexicalNode>>;
-    onError: (error: Error, editor: LexicalEditor) => void;
-    editable?: boolean;
-    theme?: EditorThemeClasses;
-    editorState?: InitialEditorStateType;
-  }>;
-};
+export type InitialConfigType = Readonly<{
+  namespace: string;
+  nodes?: ReadonlyArray<Klass<LexicalNode> | LexicalNodeReplacement>;
+  onError: (error: Error, editor: LexicalEditor) => void;
+  editable?: boolean;
+  theme?: EditorThemeClasses;
+  editorState?: InitialEditorStateType;
+  html?: HTMLConfig;
+}>;
+
+type Props = React.PropsWithChildren<{
+  initialConfig: InitialConfigType;
+}>;
 
 export function LexicalComposer({initialConfig, children}: Props): JSX.Element {
   const composerContext: [LexicalEditor, LexicalComposerContextType] = useMemo(
@@ -52,10 +58,10 @@ export function LexicalComposer({initialConfig, children}: Props): JSX.Element {
       const {
         theme,
         namespace,
-        editor__DEPRECATED: initialEditor,
         nodes,
         onError,
         editorState: initialEditorState,
+        html,
       } = initialConfig;
 
       const context: LexicalComposerContextType = createLexicalComposerContext(
@@ -63,20 +69,15 @@ export function LexicalComposer({initialConfig, children}: Props): JSX.Element {
         theme,
       );
 
-      let editor = initialEditor || null;
-
-      if (editor === null) {
-        const newEditor = createEditor({
-          editable: false,
-          namespace,
-          nodes,
-          onError: (error) => onError(error, newEditor),
-          theme,
-        });
-        initializeEditor(newEditor, initialEditorState);
-
-        editor = newEditor;
-      }
+      const editor = createEditor({
+        editable: initialConfig.editable,
+        html,
+        namespace,
+        nodes,
+        onError: (error) => onError(error, editor),
+        theme,
+      });
+      initializeEditor(editor, initialEditorState);
 
       return [editor, context];
     },
@@ -109,21 +110,20 @@ function initializeEditor(
   if (initialEditorState === null) {
     return;
   } else if (initialEditorState === undefined) {
-    // TODO Uncomment in 0.4
-    // editor.update(() => {
-    //   const root = $getRoot();
-    //   if (root.isEmpty()) {
-    //     const paragraph = $createParagraphNode();
-    //     root.append(paragraph);
-    //     const activeElement = document.activeElement;
-    //     if (
-    //       $getSelection() !== null ||
-    //       (activeElement !== null && activeElement === editor.getRootElement())
-    //     ) {
-    //       paragraph.select();
-    //     }
-    //   }
-    // }, HISTORY_MERGE_OPTIONS);
+    editor.update(() => {
+      const root = $getRoot();
+      if (root.isEmpty()) {
+        const paragraph = $createParagraphNode();
+        root.append(paragraph);
+        const activeElement = CAN_USE_DOM ? document.activeElement : null;
+        if (
+          $getSelection() !== null ||
+          (activeElement !== null && activeElement === editor.getRootElement())
+        ) {
+          paragraph.select();
+        }
+      }
+    }, HISTORY_MERGE_OPTIONS);
   } else if (initialEditorState !== null) {
     switch (typeof initialEditorState) {
       case 'string': {

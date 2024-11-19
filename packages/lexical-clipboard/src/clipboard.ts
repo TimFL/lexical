@@ -6,49 +6,57 @@
  *
  */
 
-import type {
-  GridSelection,
-  LexicalEditor,
-  LexicalNode,
-  NodeSelection,
-  RangeSelection,
-  SerializedTextNode,
-} from 'lexical';
-
 import {$generateHtmlFromNodes, $generateNodesFromDOM} from '@lexical/html';
-import {$createListNode, $isListItemNode} from '@lexical/list';
+import {$addNodeStyle, $sliceSelectedTextNodeContent} from '@lexical/selection';
+import {objectKlassEquals} from '@lexical/utils';
 import {
-  $addNodeStyle,
   $cloneWithProperties,
-  $sliceSelectedTextNodeContent,
-} from '@lexical/selection';
-import {$findMatchingParent} from '@lexical/utils';
-import {
-  $createGridSelection,
-  $createParagraphNode,
+  $createTabNode,
+  $getEditor,
   $getRoot,
   $getSelection,
-  $isDecoratorNode,
   $isElementNode,
-  $isGridCellNode,
-  $isGridNode,
-  $isGridRowNode,
-  $isGridSelection,
-  $isLineBreakNode,
   $isRangeSelection,
   $isTextNode,
   $parseSerializedNode,
-  $setSelection,
-  GridNode,
-  SELECTION_CHANGE_COMMAND,
+  BaseSelection,
+  COMMAND_PRIORITY_CRITICAL,
+  COPY_COMMAND,
+  isSelectionWithinEditor,
+  LexicalEditor,
+  LexicalNode,
+  SELECTION_INSERT_CLIPBOARD_NODES_COMMAND,
+  SerializedElementNode,
+  SerializedTextNode,
 } from 'lexical';
+import {CAN_USE_DOM} from 'shared/canUseDOM';
 import invariant from 'shared/invariant';
 
-export function $getHtmlContent(editor: LexicalEditor): string | null {
-  const selection = $getSelection();
+const getDOMSelection = (targetWindow: Window | null): Selection | null =>
+  CAN_USE_DOM ? (targetWindow || window).getSelection() : null;
 
+export interface LexicalClipboardData {
+  'text/html'?: string | undefined;
+  'application/x-lexical-editor'?: string | undefined;
+  'text/plain': string;
+}
+
+/**
+ * Returns the *currently selected* Lexical content as an HTML string, relying on the
+ * logic defined in the exportDOM methods on the LexicalNode classes. Note that
+ * this will not return the HTML content of the entire editor (unless all the content is included
+ * in the current selection).
+ *
+ * @param editor - LexicalEditor instance to get HTML content from
+ * @param selection - The selection to use (default is $getSelection())
+ * @returns a string of HTML content
+ */
+export function $getHtmlContent(
+  editor: LexicalEditor,
+  selection = $getSelection(),
+): string {
   if (selection == null) {
-    throw new Error('Expected valid LexicalSelection');
+    invariant(false, 'Expected valid LexicalSelection');
   }
 
   // If we haven't selected anything
@@ -56,17 +64,28 @@ export function $getHtmlContent(editor: LexicalEditor): string | null {
     ($isRangeSelection(selection) && selection.isCollapsed()) ||
     selection.getNodes().length === 0
   ) {
-    return null;
+    return '';
   }
 
   return $generateHtmlFromNodes(editor, selection);
 }
 
-export function $getLexicalContent(editor: LexicalEditor): string | null {
-  const selection = $getSelection();
-
+/**
+ * Returns the *currently selected* Lexical content as a JSON string, relying on the
+ * logic defined in the exportJSON methods on the LexicalNode classes. Note that
+ * this will not return the JSON content of the entire editor (unless all the content is included
+ * in the current selection).
+ *
+ * @param editor  - LexicalEditor instance to get the JSON content from
+ * @param selection - The selection to use (default is $getSelection())
+ * @returns
+ */
+export function $getLexicalContent(
+  editor: LexicalEditor,
+  selection = $getSelection(),
+): null | string {
   if (selection == null) {
-    throw new Error('Expected valid LexicalSelection');
+    invariant(false, 'Expected valid LexicalSelection');
   }
 
   // If we haven't selected anything
@@ -80,19 +99,38 @@ export function $getLexicalContent(editor: LexicalEditor): string | null {
   return JSON.stringify($generateJSONFromSelectedNodes(editor, selection));
 }
 
+/**
+ * Attempts to insert content of the mime-types text/plain or text/uri-list from
+ * the provided DataTransfer object into the editor at the provided selection.
+ * text/uri-list is only used if text/plain is not also provided.
+ *
+ * @param dataTransfer an object conforming to the [DataTransfer interface] (https://html.spec.whatwg.org/multipage/dnd.html#the-datatransfer-interface)
+ * @param selection the selection to use as the insertion point for the content in the DataTransfer object
+ */
 export function $insertDataTransferForPlainText(
   dataTransfer: DataTransfer,
-  selection: RangeSelection | GridSelection,
+  selection: BaseSelection,
 ): void {
-  const text = dataTransfer.getData('text/plain');
+  const text =
+    dataTransfer.getData('text/plain') || dataTransfer.getData('text/uri-list');
 
   if (text != null) {
     selection.insertRawText(text);
   }
 }
+
+/**
+ * Attempts to insert content of the mime-types application/x-lexical-editor, text/html,
+ * text/plain, or text/uri-list (in descending order of priority) from the provided DataTransfer
+ * object into the editor at the provided selection.
+ *
+ * @param dataTransfer an object conforming to the [DataTransfer interface] (https://html.spec.whatwg.org/multipage/dnd.html#the-datatransfer-interface)
+ * @param selection the selection to use as the insertion point for the content in the DataTransfer object
+ * @param editor the LexicalEditor the content is being inserted into.
+ */
 export function $insertDataTransferForRichText(
   dataTransfer: DataTransfer,
-  selection: RangeSelection | GridSelection,
+  selection: BaseSelection,
   editor: LexicalEditor,
 ): void {
   const lexicalString = dataTransfer.getData('application/x-lexical-editor');
@@ -107,33 +145,48 @@ export function $insertDataTransferForRichText(
         const nodes = $generateNodesFromSerializedNodes(payload.nodes);
         return $insertGeneratedNodes(editor, nodes, selection);
       }
-      // eslint-disable-next-line no-empty
-    } catch {}
+    } catch {
+      // Fail silently.
+    }
   }
 
   const htmlString = dataTransfer.getData('text/html');
   if (htmlString) {
     try {
       const parser = new DOMParser();
-      const dom = parser.parseFromString(htmlString, 'text/html');
+      const dom = parser.parseFromString(
+        trustHTML(htmlString) as string,
+        'text/html',
+      );
       const nodes = $generateNodesFromDOM(editor, dom);
       return $insertGeneratedNodes(editor, nodes, selection);
-      // eslint-disable-next-line no-empty
-    } catch {}
+    } catch {
+      // Fail silently.
+    }
   }
 
   // Multi-line plain text in rich text mode pasted as separate paragraphs
   // instead of single paragraph with linebreaks.
-  const text = dataTransfer.getData('text/plain');
+  // Webkit-specific: Supports read 'text/uri-list' in clipboard.
+  const text =
+    dataTransfer.getData('text/plain') || dataTransfer.getData('text/uri-list');
   if (text != null) {
     if ($isRangeSelection(selection)) {
-      const lines = text.split(/\r?\n/);
-      const linesLength = lines.length;
-
-      for (let i = 0; i < linesLength; i++) {
-        selection.insertText(lines[i]);
-        if (i < linesLength - 1) {
-          selection.insertParagraph();
+      const parts = text.split(/(\r?\n|\t)/);
+      if (parts[parts.length - 1] === '') {
+        parts.pop();
+      }
+      for (let i = 0; i < parts.length; i++) {
+        const currentSelection = $getSelection();
+        if ($isRangeSelection(currentSelection)) {
+          const part = parts[i];
+          if (part === '\n' || part === '\r\n') {
+            currentSelection.insertParagraph();
+          } else if (part === '\t') {
+            currentSelection.insertNodes([$createTabNode()]);
+          } else {
+            currentSelection.insertText(part);
+          }
         }
       }
     } else {
@@ -142,208 +195,43 @@ export function $insertDataTransferForRichText(
   }
 }
 
-function $insertGeneratedNodes(
+function trustHTML(html: string): string | TrustedHTML {
+  if (window.trustedTypes && window.trustedTypes.createPolicy) {
+    const policy = window.trustedTypes.createPolicy('lexical', {
+      createHTML: (input) => input,
+    });
+    return policy.createHTML(html);
+  }
+  return html;
+}
+
+/**
+ * Inserts Lexical nodes into the editor using different strategies depending on
+ * some simple selection-based heuristics. If you're looking for a generic way to
+ * to insert nodes into the editor at a specific selection point, you probably want
+ * {@link lexical.$insertNodes}
+ *
+ * @param editor LexicalEditor instance to insert the nodes into.
+ * @param nodes The nodes to insert.
+ * @param selection The selection to insert the nodes into.
+ */
+export function $insertGeneratedNodes(
   editor: LexicalEditor,
   nodes: Array<LexicalNode>,
-  selection: RangeSelection | GridSelection,
-) {
-  const isSelectionInsideOfGrid =
-    $isGridSelection(selection) ||
-    ($findMatchingParent(selection.anchor.getNode(), (n) =>
-      $isGridCellNode(n),
-    ) !== null &&
-      $findMatchingParent(selection.focus.getNode(), (n) =>
-        $isGridCellNode(n),
-      ) !== null);
-
-  if (isSelectionInsideOfGrid && nodes.length === 1 && $isGridNode(nodes[0])) {
-    $mergeGridNodesStrategy(nodes, selection, false, editor);
-    return;
+  selection: BaseSelection,
+): void {
+  if (
+    !editor.dispatchCommand(SELECTION_INSERT_CLIPBOARD_NODES_COMMAND, {
+      nodes,
+      selection,
+    })
+  ) {
+    selection.insertNodes(nodes);
   }
-
-  $basicInsertStrategy(nodes, selection);
   return;
 }
 
-function $basicInsertStrategy(
-  nodes: LexicalNode[],
-  selection: RangeSelection | GridSelection,
-) {
-  // Wrap text and inline nodes in paragraph nodes so we have all blocks at the top-level
-  const topLevelBlocks = [];
-  let currentBlock = null;
-  let list = null;
-
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i];
-
-    /**
-     * There's no good way to add this to importDOM or importJSON directly,
-     * so this is here in order to safely correct faulty clipboard data
-     * that we can't control and avoid crashing the app.
-     * https://github.com/facebook/lexical/issues/2405
-     */
-    if ($isListItemNode(node)) {
-      if (list == null) {
-        list = $createListNode('bullet');
-        topLevelBlocks.push(list);
-      }
-      list.append(node);
-      continue;
-    } else if (list != null) {
-      list = null;
-    }
-
-    if (
-      ($isDecoratorNode(node) && !node.isTopLevel()) ||
-      ($isElementNode(node) && node.isInline()) ||
-      $isTextNode(node) ||
-      $isLineBreakNode(node)
-    ) {
-      if (currentBlock === null) {
-        currentBlock = $createParagraphNode();
-        topLevelBlocks.push(currentBlock);
-      }
-
-      if (currentBlock !== null) {
-        currentBlock.append(node);
-      }
-    } else {
-      topLevelBlocks.push(node);
-      currentBlock = null;
-    }
-  }
-
-  if ($isRangeSelection(selection)) {
-    selection.insertNodes(topLevelBlocks);
-  } else if ($isGridSelection(selection)) {
-    // If there's an active grid selection and a non grid is pasted, add to the anchor.
-    const anchorCell = selection.anchor.getNode();
-
-    if (!$isGridCellNode(anchorCell)) {
-      invariant(false, 'Expected Grid Cell in Grid Selection');
-    }
-
-    anchorCell.append(...topLevelBlocks);
-  }
-}
-
-function $mergeGridNodesStrategy(
-  nodes: LexicalNode[],
-  selection: RangeSelection | GridSelection,
-  isFromLexical: boolean,
-  editor: LexicalEditor,
-) {
-  if (nodes.length !== 1 || !$isGridNode(nodes[0])) {
-    invariant(false, '$mergeGridNodesStrategy: Expected Grid insertion.');
-  }
-
-  const newGrid = nodes[0];
-  const newGridRows = newGrid.getChildren();
-  const newColumnCount = newGrid
-    .getFirstChildOrThrow<GridNode>()
-    .getChildrenSize();
-  const newRowCount = newGrid.getChildrenSize();
-  const gridCellNode = $findMatchingParent(selection.anchor.getNode(), (n) =>
-    $isGridCellNode(n),
-  );
-  const gridRowNode =
-    gridCellNode && $findMatchingParent(gridCellNode, (n) => $isGridRowNode(n));
-  const gridNode =
-    gridRowNode && $findMatchingParent(gridRowNode, (n) => $isGridNode(n));
-
-  if (
-    !$isGridCellNode(gridCellNode) ||
-    !$isGridRowNode(gridRowNode) ||
-    !$isGridNode(gridNode)
-  ) {
-    invariant(
-      false,
-      '$mergeGridNodesStrategy: Expected selection to be inside of a Grid.',
-    );
-  }
-
-  const startY = gridRowNode.getIndexWithinParent();
-  const stopY = Math.min(
-    gridNode.getChildrenSize() - 1,
-    startY + newRowCount - 1,
-  );
-  const startX = gridCellNode.getIndexWithinParent();
-  const stopX = Math.min(
-    gridRowNode.getChildrenSize() - 1,
-    startX + newColumnCount - 1,
-  );
-  const fromX = Math.min(startX, stopX);
-  const fromY = Math.min(startY, stopY);
-  const toX = Math.max(startX, stopX);
-  const toY = Math.max(startY, stopY);
-  const gridRowNodes = gridNode.getChildren();
-  let newRowIdx = 0;
-  let newAnchorCellKey;
-  let newFocusCellKey;
-
-  for (let r = fromY; r <= toY; r++) {
-    const currentGridRowNode = gridRowNodes[r];
-
-    if (!$isGridRowNode(currentGridRowNode)) {
-      invariant(false, 'getNodes: expected to find GridRowNode');
-    }
-
-    const newGridRowNode = newGridRows[newRowIdx];
-
-    if (!$isGridRowNode(newGridRowNode)) {
-      invariant(false, 'getNodes: expected to find GridRowNode');
-    }
-
-    const gridCellNodes = currentGridRowNode.getChildren();
-    const newGridCellNodes = newGridRowNode.getChildren();
-    let newColumnIdx = 0;
-
-    for (let c = fromX; c <= toX; c++) {
-      const currentGridCellNode = gridCellNodes[c];
-
-      if (!$isGridCellNode(currentGridCellNode)) {
-        invariant(false, 'getNodes: expected to find GridCellNode');
-      }
-
-      const newGridCellNode = newGridCellNodes[newColumnIdx];
-
-      if (!$isGridCellNode(newGridCellNode)) {
-        invariant(false, 'getNodes: expected to find GridCellNode');
-      }
-
-      if (r === fromY && c === fromX) {
-        newAnchorCellKey = currentGridCellNode.getKey();
-      } else if (r === toY && c === toX) {
-        newFocusCellKey = currentGridCellNode.getKey();
-      }
-
-      const originalChildren = currentGridCellNode.getChildren();
-      newGridCellNode.getChildren().forEach((child) => {
-        if ($isTextNode(child)) {
-          const paragraphNode = $createParagraphNode();
-          paragraphNode.append(child);
-          currentGridCellNode.append(child);
-        } else {
-          currentGridCellNode.append(child);
-        }
-      });
-      originalChildren.forEach((n) => n.remove());
-      newColumnIdx++;
-    }
-
-    newRowIdx++;
-  }
-
-  if (newAnchorCellKey && newFocusCellKey) {
-    const newGridSelection = $createGridSelection();
-    newGridSelection.set(gridNode.getKey(), newAnchorCellKey, newFocusCellKey);
-    $setSelection(newGridSelection);
-    editor.dispatchCommand(SELECTION_CHANGE_COMMAND, undefined);
-  }
-}
-
-interface BaseSerializedNode {
+export interface BaseSerializedNode {
   children?: Array<BaseSerializedNode>;
   type: string;
   version: number;
@@ -353,7 +241,6 @@ function exportNodeToJSON<T extends LexicalNode>(node: T): BaseSerializedNode {
   const serializedNode = node.exportJSON();
   const nodeClass = node.constructor;
 
-  // @ts-expect-error TODO Replace Class utility type with InstanceType
   if (serializedNode.type !== nodeClass.getType()) {
     invariant(
       false,
@@ -362,10 +249,9 @@ function exportNodeToJSON<T extends LexicalNode>(node: T): BaseSerializedNode {
     );
   }
 
-  // @ts-expect-error TODO Replace Class utility type with InstanceType
-  const serializedChildren = serializedNode.children;
-
   if ($isElementNode(node)) {
+    const serializedChildren = (serializedNode as SerializedElementNode)
+      .children;
     if (!Array.isArray(serializedChildren)) {
       invariant(
         false,
@@ -380,30 +266,44 @@ function exportNodeToJSON<T extends LexicalNode>(node: T): BaseSerializedNode {
 
 function $appendNodesToJSON(
   editor: LexicalEditor,
-  selection: RangeSelection | NodeSelection | GridSelection | null,
+  selection: BaseSelection | null,
   currentNode: LexicalNode,
   targetArray: Array<BaseSerializedNode> = [],
 ): boolean {
-  let shouldInclude = selection != null ? currentNode.isSelected() : true;
+  let shouldInclude =
+    selection !== null ? currentNode.isSelected(selection) : true;
   const shouldExclude =
     $isElementNode(currentNode) && currentNode.excludeFromCopy('html');
-  let clone = $cloneWithProperties<LexicalNode>(currentNode);
-  clone =
-    $isTextNode(clone) && selection != null
-      ? $sliceSelectedTextNodeContent(selection, clone)
-      : clone;
-  const children = $isElementNode(clone) ? clone.getChildren() : [];
+  let target = currentNode;
 
-  const serializedNode = exportNodeToJSON(clone);
+  if (selection !== null) {
+    let clone = $cloneWithProperties(currentNode);
+    clone =
+      $isTextNode(clone) && selection !== null
+        ? $sliceSelectedTextNodeContent(selection, clone)
+        : clone;
+    target = clone;
+  }
+  const children = $isElementNode(target) ? target.getChildren() : [];
 
-  // TODO: TextNode calls getTextContent() (NOT node.__text) within it's exportJSON method
+  const serializedNode = exportNodeToJSON(target);
+
+  // TODO: TextNode calls getTextContent() (NOT node.__text) within its exportJSON method
   // which uses getLatest() to get the text from the original node with the same key.
   // This is a deeper issue with the word "clone" here, it's still a reference to the
   // same node as far as the LexicalEditor is concerned since it shares a key.
-  // We need a way to create a clone of a Node in memory with it's own key, but
+  // We need a way to create a clone of a Node in memory with its own key, but
   // until then this hack will work for the selected text extract use case.
-  if ($isTextNode(clone)) {
-    (serializedNode as SerializedTextNode).text = clone.__text;
+  if ($isTextNode(target)) {
+    const text = target.__text;
+    // If an uncollapsed selection ends or starts at the end of a line of specialized,
+    // TextNodes, such as code tokens, we will get a 'blank' TextNode here, i.e., one
+    // with text of length 0. We don't want this, it makes a confusing mess. Reset!
+    if (text.length > 0) {
+      (serializedNode as SerializedTextNode).text = text;
+    } else {
+      shouldInclude = false;
+    }
   }
 
   for (let i = 0; i < children.length; i++) {
@@ -437,11 +337,19 @@ function $appendNodesToJSON(
   return shouldInclude;
 }
 
+// TODO why $ function with Editor instance?
+/**
+ * Gets the Lexical JSON of the nodes inside the provided Selection.
+ *
+ * @param editor LexicalEditor to get the JSON content from.
+ * @param selection Selection to get the JSON content from.
+ * @returns an object with the editor namespace and a list of serializable nodes as JavaScript objects.
+ */
 export function $generateJSONFromSelectedNodes<
   SerializedNode extends BaseSerializedNode,
 >(
   editor: LexicalEditor,
-  selection: RangeSelection | NodeSelection | GridSelection | null,
+  selection: BaseSelection | null,
 ): {
   namespace: string;
   nodes: Array<SerializedNode>;
@@ -459,6 +367,14 @@ export function $generateJSONFromSelectedNodes<
   };
 }
 
+/**
+ * This method takes an array of objects conforming to the BaseSeralizedNode interface and returns
+ * an Array containing instances of the corresponding LexicalNode classes registered on the editor.
+ * Normally, you'd get an Array of BaseSerialized nodes from {@link $generateJSONFromSelectedNodes}
+ *
+ * @param serializedNodes an Array of objects conforming to the BaseSerializedNode interface.
+ * @returns an Array of Lexical Node objects.
+ */
 export function $generateNodesFromSerializedNodes(
   serializedNodes: Array<BaseSerializedNode>,
 ): Array<LexicalNode> {
@@ -472,4 +388,168 @@ export function $generateNodesFromSerializedNodes(
     nodes.push(node);
   }
   return nodes;
+}
+
+const EVENT_LATENCY = 50;
+let clipboardEventTimeout: null | number = null;
+
+// TODO custom selection
+// TODO potentially have a node customizable version for plain text
+/**
+ * Copies the content of the current selection to the clipboard in
+ * text/plain, text/html, and application/x-lexical-editor (Lexical JSON)
+ * formats.
+ *
+ * @param editor the LexicalEditor instance to copy content from
+ * @param event the native browser ClipboardEvent to add the content to.
+ * @returns
+ */
+export async function copyToClipboard(
+  editor: LexicalEditor,
+  event: null | ClipboardEvent,
+  data?: LexicalClipboardData,
+): Promise<boolean> {
+  if (clipboardEventTimeout !== null) {
+    // Prevent weird race conditions that can happen when this function is run multiple times
+    // synchronously. In the future, we can do better, we can cancel/override the previously running job.
+    return false;
+  }
+  if (event !== null) {
+    return new Promise((resolve, reject) => {
+      editor.update(() => {
+        resolve($copyToClipboardEvent(editor, event, data));
+      });
+    });
+  }
+
+  const rootElement = editor.getRootElement();
+  const windowDocument =
+    editor._window == null ? window.document : editor._window.document;
+  const domSelection = getDOMSelection(editor._window);
+  if (rootElement === null || domSelection === null) {
+    return false;
+  }
+  const element = windowDocument.createElement('span');
+  element.style.cssText = 'position: fixed; top: -1000px;';
+  element.append(windowDocument.createTextNode('#'));
+  rootElement.append(element);
+  const range = new Range();
+  range.setStart(element, 0);
+  range.setEnd(element, 1);
+  domSelection.removeAllRanges();
+  domSelection.addRange(range);
+  return new Promise((resolve, reject) => {
+    const removeListener = editor.registerCommand(
+      COPY_COMMAND,
+      (secondEvent) => {
+        if (objectKlassEquals(secondEvent, ClipboardEvent)) {
+          removeListener();
+          if (clipboardEventTimeout !== null) {
+            window.clearTimeout(clipboardEventTimeout);
+            clipboardEventTimeout = null;
+          }
+          resolve(
+            $copyToClipboardEvent(editor, secondEvent as ClipboardEvent, data),
+          );
+        }
+        // Block the entire copy flow while we wait for the next ClipboardEvent
+        return true;
+      },
+      COMMAND_PRIORITY_CRITICAL,
+    );
+    // If the above hack execCommand hack works, this timeout code should never fire. Otherwise,
+    // the listener will be quickly freed so that the user can reuse it again
+    clipboardEventTimeout = window.setTimeout(() => {
+      removeListener();
+      clipboardEventTimeout = null;
+      resolve(false);
+    }, EVENT_LATENCY);
+    windowDocument.execCommand('copy');
+    element.remove();
+  });
+}
+
+// TODO shouldn't pass editor (pass namespace directly)
+function $copyToClipboardEvent(
+  editor: LexicalEditor,
+  event: ClipboardEvent,
+  data?: LexicalClipboardData,
+): boolean {
+  if (data === undefined) {
+    const domSelection = getDOMSelection(editor._window);
+    if (!domSelection) {
+      return false;
+    }
+    const anchorDOM = domSelection.anchorNode;
+    const focusDOM = domSelection.focusNode;
+    if (
+      anchorDOM !== null &&
+      focusDOM !== null &&
+      !isSelectionWithinEditor(editor, anchorDOM, focusDOM)
+    ) {
+      return false;
+    }
+    const selection = $getSelection();
+    if (selection === null) {
+      return false;
+    }
+    data = $getClipboardDataFromSelection(selection);
+  }
+  event.preventDefault();
+  const clipboardData = event.clipboardData;
+  if (clipboardData === null) {
+    return false;
+  }
+  setLexicalClipboardDataTransfer(clipboardData, data);
+  return true;
+}
+
+const clipboardDataFunctions = [
+  ['text/html', $getHtmlContent],
+  ['application/x-lexical-editor', $getLexicalContent],
+] as const;
+
+/**
+ * Serialize the content of the current selection to strings in
+ * text/plain, text/html, and application/x-lexical-editor (Lexical JSON)
+ * formats (as available).
+ *
+ * @param selection the selection to serialize (defaults to $getSelection())
+ * @returns LexicalClipboardData
+ */
+export function $getClipboardDataFromSelection(
+  selection: BaseSelection | null = $getSelection(),
+): LexicalClipboardData {
+  const clipboardData: LexicalClipboardData = {
+    'text/plain': selection ? selection.getTextContent() : '',
+  };
+  if (selection) {
+    const editor = $getEditor();
+    for (const [mimeType, $editorFn] of clipboardDataFunctions) {
+      const v = $editorFn(editor, selection);
+      if (v !== null) {
+        clipboardData[mimeType] = v;
+      }
+    }
+  }
+  return clipboardData;
+}
+
+/**
+ * Call setData on the given clipboardData for each MIME type present
+ * in the given data (from {@link $getClipboardDataFromSelection})
+ *
+ * @param clipboardData the event.clipboardData to populate from data
+ * @param data The lexical data
+ */
+export function setLexicalClipboardDataTransfer(
+  clipboardData: DataTransfer,
+  data: LexicalClipboardData,
+) {
+  for (const k in data) {
+    const v = data[k as keyof LexicalClipboardData];
+    if (v !== undefined) {
+      clipboardData.setData(k, v);
+    }
+  }
 }

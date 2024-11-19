@@ -11,6 +11,8 @@ import type {EditorThemeClasses} from 'lexical';
 import './PlaygroundEditorTheme.css';
 
 const theme: EditorThemeClasses = {
+  autocomplete: 'PlaygroundEditorTheme__autocomplete',
+  blockCursor: 'PlaygroundEditorTheme__blockCursor',
   characterLimit: 'PlaygroundEditorTheme__characterLimit',
   code: 'PlaygroundEditorTheme__code',
   codeHighlight: {
@@ -58,9 +60,15 @@ const theme: EditorThemeClasses = {
     h5: 'PlaygroundEditorTheme__h5',
     h6: 'PlaygroundEditorTheme__h6',
   },
+  hr: 'PlaygroundEditorTheme__hr',
   image: 'editor-image',
+  indent: 'PlaygroundEditorTheme__indent',
+  inlineImage: 'inline-editor-image',
+  layoutContainer: 'PlaygroundEditorTheme__layoutContainer',
+  layoutItem: 'PlaygroundEditorTheme__layoutItem',
   link: 'PlaygroundEditorTheme__link',
   list: {
+    checklist: 'PlaygroundEditorTheme__checklist',
     listitem: 'PlaygroundEditorTheme__listItem',
     listitemChecked: 'PlaygroundEditorTheme__listItemChecked',
     listitemUnchecked: 'PlaygroundEditorTheme__listItemUnchecked',
@@ -84,7 +92,20 @@ const theme: EditorThemeClasses = {
   rtl: 'PlaygroundEditorTheme__rtl',
   table: 'PlaygroundEditorTheme__table',
   tableCell: 'PlaygroundEditorTheme__tableCell',
+  tableCellActionButton: 'PlaygroundEditorTheme__tableCellActionButton',
+  tableCellActionButtonContainer:
+    'PlaygroundEditorTheme__tableCellActionButtonContainer',
+  tableCellEditing: 'PlaygroundEditorTheme__tableCellEditing',
   tableCellHeader: 'PlaygroundEditorTheme__tableCellHeader',
+  tableCellPrimarySelected: 'PlaygroundEditorTheme__tableCellPrimarySelected',
+  tableCellResizer: 'PlaygroundEditorTheme__tableCellResizer',
+  tableCellSelected: 'PlaygroundEditorTheme__tableCellSelected',
+  tableCellSortedIndicator: 'PlaygroundEditorTheme__tableCellSortedIndicator',
+  tableResizeRuler: 'PlaygroundEditorTheme__tableCellResizeRuler',
+  tableRowStriping: 'PlaygroundEditorTheme__tableRowStriping',
+  tableScrollableWrapper: 'PlaygroundEditorTheme__tableScrollableWrapper',
+  tableSelected: 'PlaygroundEditorTheme__tableSelected',
+  tableSelection: 'PlaygroundEditorTheme__tableSelection',
   text: {
     bold: 'PlaygroundEditorTheme__textBold',
     code: 'PlaygroundEditorTheme__textCode',

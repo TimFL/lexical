@@ -17,11 +17,12 @@ import {
   $isRangeSelection,
   $isTextNode,
 } from 'lexical';
+import invariant from 'shared/invariant';
 import simpleDiffWithCursor from 'shared/simpleDiffWithCursor';
 
 import {syncPropertiesFromLexical, syncPropertiesFromYjs} from './Utils';
 
-function diffTextContentAndApplyDelta(
+function $diffTextContentAndApplyDelta(
   collabNode: CollabTextNode,
   key: NodeKey,
   prevText: string,
@@ -133,7 +134,7 @@ export class CollabTextNode {
 
       if (prevText !== nextText) {
         const key = nextLexicalNode.__key;
-        diffTextContentAndApplyDelta(this, key, prevText, nextText);
+        $diffTextContentAndApplyDelta(this, key, prevText, nextText);
         this._text = nextText;
       }
     }
@@ -144,10 +145,10 @@ export class CollabTextNode {
     keysChanged: null | Set<string>,
   ): void {
     const lexicalNode = this.getNode();
-
-    if (lexicalNode === null) {
-      throw new Error('Should never happen');
-    }
+    invariant(
+      lexicalNode !== null,
+      'syncPropertiesAndTextFromYjs: could not find decorator node',
+    );
 
     syncPropertiesFromYjs(binding, this._map, lexicalNode, keysChanged);
 
@@ -172,7 +173,6 @@ export function $createCollabTextNode(
   type: string,
 ): CollabTextNode {
   const collabNode = new CollabTextNode(map, text, parent, type);
-  // @ts-expect-error: internal field
   map._collabNode = collabNode;
   return collabNode;
 }

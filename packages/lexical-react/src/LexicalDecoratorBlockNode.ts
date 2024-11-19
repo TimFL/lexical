@@ -39,6 +39,10 @@ export class DecoratorBlockNode extends DecoratorNode<JSX.Element> {
     };
   }
 
+  canIndent(): false {
+    return false;
+  }
+
   createDOM(): HTMLElement {
     return document.createElement('div');
   }
@@ -50,6 +54,10 @@ export class DecoratorBlockNode extends DecoratorNode<JSX.Element> {
   setFormat(format: ElementFormatType): void {
     const self = this.getWritable();
     self.__format = format;
+  }
+
+  isInline(): false {
+    return false;
   }
 }
 

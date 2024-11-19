@@ -6,22 +6,11 @@
  *
  */
 
-import type {
-  EditorConfig,
-  LexicalNode,
-  SerializedTextNode,
-  Spread,
-} from 'lexical';
+import type {EditorConfig, LexicalNode, SerializedTextNode} from 'lexical';
 
 import {TextNode} from 'lexical';
 
-export type SerializedKeywordNode = Spread<
-  {
-    type: 'keyword';
-    version: 1;
-  },
-  SerializedTextNode
->;
+export type SerializedKeywordNode = SerializedTextNode;
 
 export class KeywordNode extends TextNode {
   static getType(): string {
@@ -73,8 +62,6 @@ export function $createKeywordNode(keyword: string): KeywordNode {
   return new KeywordNode(keyword);
 }
 
-export function $isKeywordNode(
-  node: LexicalNode | null | undefined | undefined,
-): boolean {
+export function $isKeywordNode(node: LexicalNode | null | undefined): boolean {
   return node instanceof KeywordNode;
 }

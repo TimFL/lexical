@@ -7,21 +7,17 @@
  */
 
 import type {Binding} from '.';
-import type {
-  ElementNode,
-  IntentionallyMarkedAsDirtyElement,
-  NodeKey,
-  NodeMap,
-} from 'lexical';
-import type {AbstractType, XmlElement, XmlText} from 'yjs';
+import type {ElementNode, NodeKey, NodeMap} from 'lexical';
+import type {AbstractType, Map as YMap, XmlElement, XmlText} from 'yjs';
 
+import {$createChildrenArray} from '@lexical/offset';
 import {
   $getNodeByKey,
   $isDecoratorNode,
   $isElementNode,
   $isTextNode,
 } from 'lexical';
-import {YMap} from 'yjs/dist/src/internals';
+import invariant from 'shared/invariant';
 
 import {CollabDecoratorNode} from './CollabDecoratorNode';
 import {CollabLineBreakNode} from './CollabLineBreakNode';
@@ -29,13 +25,16 @@ import {CollabTextNode} from './CollabTextNode';
 import {
   $createCollabNodeFromLexicalNode,
   $getNodeByKeyOrThrow,
+  $getOrInitCollabNodeFromSharedType,
   createLexicalNodeFromCollabNode,
-  getOrInitCollabNodeFromSharedType,
   getPositionFromElementAndOffset,
+  removeFromParent,
   spliceString,
   syncPropertiesFromLexical,
   syncPropertiesFromYjs,
 } from './Utils';
+
+type IntentionallyMarkedAsDirtyElement = boolean;
 
 export class CollabElementNode {
   _key: NodeKey;
@@ -97,10 +96,10 @@ export class CollabElementNode {
 
   getOffset(): number {
     const collabElementNode = this._parent;
-
-    if (collabElementNode === null) {
-      throw new Error('Should never happen');
-    }
+    invariant(
+      collabElementNode !== null,
+      'getOffset: could not find collab element node',
+    );
 
     return collabElementNode.getChildOffset(this);
   }
@@ -110,12 +109,10 @@ export class CollabElementNode {
     keysChanged: null | Set<string>,
   ): void {
     const lexicalNode = this.getNode();
-
-    if (lexicalNode === null) {
-      this.getNode();
-      throw new Error('Should never happen');
-    }
-
+    invariant(
+      lexicalNode !== null,
+      'syncPropertiesFromYjs: could not find element node',
+    );
     syncPropertiesFromYjs(binding, this._xmlText, lexicalNode, keysChanged);
   }
 
@@ -160,21 +157,25 @@ export class CollabElementNode {
               nodeIndex !== 0 ? children[nodeIndex - 1] : null;
             const nodeSize = node.getSize();
 
-            if (
-              offset === 0 &&
-              delCount === 1 &&
-              nodeIndex > 0 &&
-              prevCollabNode instanceof CollabTextNode &&
-              length === nodeSize &&
-              // If the node has no keys, it's been deleted
-              Array.from(node._map.keys()).length === 0
-            ) {
-              // Merge the text node with previous.
-              prevCollabNode._text += node._text;
+            if (offset === 0 && length === nodeSize) {
+              // Text node has been deleted.
               children.splice(nodeIndex, 1);
-            } else if (offset === 0 && delCount === nodeSize) {
-              // The entire thing needs removing
-              children.splice(nodeIndex, 1);
+              // If this was caused by an undo from YJS, there could be dangling text.
+              const danglingText = spliceString(
+                node._text,
+                offset,
+                delCount - 1,
+                '',
+              );
+              if (danglingText.length > 0) {
+                if (prevCollabNode instanceof CollabTextNode) {
+                  // Merge the text node with previous.
+                  prevCollabNode._text += danglingText;
+                } else {
+                  // No previous text node to merge into, just delete the text.
+                  this._xmlText.delete(offset, danglingText.length);
+                }
+              }
             } else {
               node._text = spliceString(node._text, offset, delCount, '');
             }
@@ -215,7 +216,7 @@ export class CollabElementNode {
             currIndex,
             false,
           );
-          const collabNode = getOrInitCollabNodeFromSharedType(
+          const collabNode = $getOrInitCollabNodeFromSharedType(
             binding,
             sharedType as XmlText | YMap<unknown> | XmlElement,
             this,
@@ -232,14 +233,13 @@ export class CollabElementNode {
   syncChildrenFromYjs(binding: Binding): void {
     // Now diff the children of the collab node with that of our existing Lexical node.
     const lexicalNode = this.getNode();
-
-    if (lexicalNode === null) {
-      this.getNode();
-      throw new Error('Should never happen');
-    }
+    invariant(
+      lexicalNode !== null,
+      'syncChildrenFromYjs: could not find element node',
+    );
 
     const key = lexicalNode.__key;
-    const prevLexicalChildrenKeys = lexicalNode.__children;
+    const prevLexicalChildrenKeys = $createChildrenArray(lexicalNode, null);
     const nextLexicalChildrenKeys: Array<NodeKey> = [];
     const lexicalChildrenKeysLength = prevLexicalChildrenKeys.length;
     const collabChildren = this._children;
@@ -247,19 +247,13 @@ export class CollabElementNode {
     const collabNodeMap = binding.collabNodeMap;
     const visitedKeys = new Set();
     let collabKeys;
-
-    // Assign the new children key array that we're about to mutate
     let writableLexicalNode;
+    let prevIndex = 0;
+    let prevChildNode = null;
 
     if (collabChildrenLength !== lexicalChildrenKeysLength) {
-      writableLexicalNode = lazilyCloneElementNode(
-        lexicalNode,
-        writableLexicalNode,
-        nextLexicalChildrenKeys,
-      );
+      writableLexicalNode = lexicalNode.getWritable();
     }
-
-    let prevIndex = 0;
 
     for (let i = 0; i < collabChildrenLength; i++) {
       const lexicalChildKey = prevLexicalChildrenKeys[prevIndex];
@@ -285,11 +279,15 @@ export class CollabElementNode {
           } else if (childCollabNode instanceof CollabDecoratorNode) {
             childCollabNode.syncPropertiesFromYjs(binding, null);
           } else if (!(childCollabNode instanceof CollabLineBreakNode)) {
-            throw new Error('Should never happen');
+            invariant(
+              false,
+              'syncChildrenFromYjs: expected text, element, decorator, or linebreak collab node',
+            );
           }
         }
 
         nextLexicalChildrenKeys[i] = lexicalChildKey;
+        prevChildNode = collabLexicalChildNode;
         prevIndex++;
       } else {
         if (collabKeys === undefined) {
@@ -310,16 +308,14 @@ export class CollabElementNode {
           lexicalChildKey !== undefined &&
           !collabKeys.has(lexicalChildKey)
         ) {
+          const nodeToRemove = $getNodeByKeyOrThrow(lexicalChildKey);
+          removeFromParent(nodeToRemove);
           i--;
           prevIndex++;
           continue;
         }
 
-        writableLexicalNode = lazilyCloneElementNode(
-          lexicalNode,
-          writableLexicalNode,
-          nextLexicalChildrenKeys,
-        );
+        writableLexicalNode = lexicalNode.getWritable();
         // Create/Replace
         const lexicalChildNode = createLexicalNodeFromCollabNode(
           binding,
@@ -329,6 +325,30 @@ export class CollabElementNode {
         const childKey = lexicalChildNode.__key;
         collabNodeMap.set(childKey, childCollabNode);
         nextLexicalChildrenKeys[i] = childKey;
+        if (prevChildNode === null) {
+          const nextSibling = writableLexicalNode.getFirstChild();
+          writableLexicalNode.__first = childKey;
+          if (nextSibling !== null) {
+            const writableNextSibling = nextSibling.getWritable();
+            writableNextSibling.__prev = childKey;
+            lexicalChildNode.__next = writableNextSibling.__key;
+          }
+        } else {
+          const writablePrevChildNode = prevChildNode.getWritable();
+          const nextSibling = prevChildNode.getNextSibling();
+          writablePrevChildNode.__next = childKey;
+          lexicalChildNode.__prev = prevChildNode.__key;
+          if (nextSibling !== null) {
+            const writableNextSibling = nextSibling.getWritable();
+            writableNextSibling.__prev = childKey;
+            lexicalChildNode.__next = writableNextSibling.__key;
+          }
+        }
+        if (i === collabChildrenLength - 1) {
+          writableLexicalNode.__last = childKey;
+        }
+        writableLexicalNode.__size++;
+        prevChildNode = lexicalChildNode;
       }
     }
 
@@ -337,15 +357,13 @@ export class CollabElementNode {
 
       if (!visitedKeys.has(lexicalChildKey)) {
         // Remove
-        const lexicalChildNode =
-          $getNodeByKeyOrThrow(lexicalChildKey).getWritable();
+        const lexicalChildNode = $getNodeByKeyOrThrow(lexicalChildKey);
         const collabNode = binding.collabNodeMap.get(lexicalChildKey);
 
         if (collabNode !== undefined) {
           collabNode.destroy(binding);
         }
-
-        lexicalChildNode.__parent = null;
+        removeFromParent(lexicalChildNode);
       }
     }
   }
@@ -421,8 +439,10 @@ export class CollabElementNode {
   ): void {
     const prevLexicalNode = this.getPrevNode(prevNodeMap);
     const prevChildren =
-      prevLexicalNode === null ? [] : prevLexicalNode.__children;
-    const nextChildren = nextLexicalNode.__children;
+      prevLexicalNode === null
+        ? []
+        : $createChildrenArray(prevLexicalNode, prevNodeMap);
+    const nextChildren = $createChildrenArray(nextLexicalNode, null);
     const prevEndIndex = prevChildren.length - 1;
     const nextEndIndex = nextChildren.length - 1;
     const collabNodeMap = binding.collabNodeMap;
@@ -554,20 +574,16 @@ export class CollabElementNode {
     const child = children[index];
 
     if (child === undefined) {
-      if (collabNode !== undefined) {
-        this.append(collabNode);
-      } else {
-        throw new Error('Should never happen');
-      }
-
+      invariant(
+        collabNode !== undefined,
+        'splice: could not find collab element node',
+      );
+      this.append(collabNode);
       return;
     }
 
     const offset = child.getOffset();
-
-    if (offset === -1) {
-      throw new Error('Should never happen');
-    }
+    invariant(offset !== -1, 'splice: expected offset to be greater than zero');
 
     const xmlText = this._xmlText;
 
@@ -643,27 +659,12 @@ export class CollabElementNode {
   }
 }
 
-function lazilyCloneElementNode(
-  lexicalNode: ElementNode,
-  writableLexicalNode: ElementNode | undefined,
-  nextLexicalChildrenKeys: Array<NodeKey>,
-): ElementNode {
-  if (writableLexicalNode === undefined) {
-    const clone = lexicalNode.getWritable();
-    clone.__children = nextLexicalChildrenKeys;
-    return clone;
-  }
-
-  return writableLexicalNode;
-}
-
 export function $createCollabElementNode(
   xmlText: XmlText,
   parent: null | CollabElementNode,
   type: string,
 ): CollabElementNode {
   const collabNode = new CollabElementNode(xmlText, parent, type);
-  // @ts-expect-error: internal field
   xmlText._collabNode = collabNode;
   return collabNode;
 }

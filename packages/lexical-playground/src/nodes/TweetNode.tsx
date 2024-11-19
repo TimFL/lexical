@@ -41,7 +41,7 @@ type TweetComponentProps = Readonly<{
   tweetID: string;
 }>;
 
-function convertTweetElement(
+function $convertTweetElement(
   domNode: HTMLDivElement,
 ): DOMConversionOutput | null {
   const id = domNode.getAttribute('data-lexical-tweet-id');
@@ -126,8 +126,6 @@ function TweetComponent({
 export type SerializedTweetNode = Spread<
   {
     id: string;
-    type: 'tweet';
-    version: 1;
   },
   SerializedDecoratorBlockNode
 >;
@@ -165,7 +163,7 @@ export class TweetNode extends DecoratorBlockNode {
           return null;
         }
         return {
-          conversion: convertTweetElement,
+          conversion: $convertTweetElement,
           priority: 2,
         };
       },
@@ -175,6 +173,8 @@ export class TweetNode extends DecoratorBlockNode {
   exportDOM(): DOMExportOutput {
     const element = document.createElement('div');
     element.setAttribute('data-lexical-tweet-id', this.__id);
+    const text = document.createTextNode(this.getTextContent());
+    element.append(text);
     return {element};
   }
 
@@ -191,7 +191,7 @@ export class TweetNode extends DecoratorBlockNode {
     _includeInert?: boolean | undefined,
     _includeDirectionless?: false | undefined,
   ): string {
-    return `https://twitter.com/i/web/status/${this.__id}`;
+    return `https://x.com/i/web/status/${this.__id}`;
   }
 
   decorate(editor: LexicalEditor, config: EditorConfig): JSX.Element {
@@ -209,10 +209,6 @@ export class TweetNode extends DecoratorBlockNode {
         tweetID={this.__id}
       />
     );
-  }
-
-  isTopLevel(): true {
-    return true;
   }
 }
 

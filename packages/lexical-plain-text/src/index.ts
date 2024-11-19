@@ -1,4 +1,3 @@
-/** @module @lexical/plain-text */
 /**
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
@@ -7,7 +6,7 @@
  *
  */
 
-import type {CommandPayloadType, EditorState, LexicalEditor} from 'lexical';
+import type {CommandPayloadType, LexicalEditor} from 'lexical';
 
 import {
   $getHtmlContent,
@@ -17,12 +16,11 @@ import {
   $moveCharacter,
   $shouldOverrideDefaultCharacterSelection,
 } from '@lexical/selection';
-import {mergeRegister} from '@lexical/utils';
+import {mergeRegister, objectKlassEquals} from '@lexical/utils';
 import {
-  $createParagraphNode,
-  $getRoot,
   $getSelection,
   $isRangeSelection,
+  $selectAll,
   COMMAND_PRIORITY_EDITOR,
   CONTROLLED_TEXT_INSERTION_COMMAND,
   COPY_COMMAND,
@@ -41,47 +39,36 @@ import {
   KEY_ENTER_COMMAND,
   PASTE_COMMAND,
   REMOVE_TEXT_COMMAND,
+  SELECT_ALL_COMMAND,
 } from 'lexical';
-import {CAN_USE_BEFORE_INPUT, IS_IOS, IS_SAFARI} from 'shared/environment';
-
-export type InitialEditorStateType =
-  | null
-  | string
-  | EditorState
-  | ((editor: LexicalEditor) => void);
-
-// Convoluted logic to make this work with Flow. Order matters.
-const options = {
-  tag: 'history-merge',
-};
-
-const setEditorOptions: {
-  tag?: string;
-} = options;
-const updateOptions: {
-  onUpdate?: () => void;
-  skipTransforms?: true;
-  tag?: string;
-} = options;
+import {
+  CAN_USE_BEFORE_INPUT,
+  IS_APPLE_WEBKIT,
+  IS_IOS,
+  IS_SAFARI,
+} from 'shared/environment';
 
 function onCopyForPlainText(
   event: CommandPayloadType<typeof COPY_COMMAND>,
   editor: LexicalEditor,
 ): void {
   editor.update(() => {
-    const clipboardData =
-      event instanceof KeyboardEvent ? null : event.clipboardData;
-    const selection = $getSelection();
+    if (event !== null) {
+      const clipboardData = objectKlassEquals(event, KeyboardEvent)
+        ? null
+        : (event as ClipboardEvent).clipboardData;
+      const selection = $getSelection();
 
-    if (selection !== null && clipboardData != null) {
-      event.preventDefault();
-      const htmlString = $getHtmlContent(editor);
+      if (selection !== null && clipboardData != null) {
+        event.preventDefault();
+        const htmlString = $getHtmlContent(editor);
 
-      if (htmlString !== null) {
-        clipboardData.setData('text/html', htmlString);
+        if (htmlString !== null) {
+          clipboardData.setData('text/html', htmlString);
+        }
+
+        clipboardData.setData('text/plain', selection.getTextContent());
       }
-
-      clipboardData.setData('text/plain', selection.getTextContent());
     }
   });
 }
@@ -94,9 +81,7 @@ function onPasteForPlainText(
   editor.update(
     () => {
       const selection = $getSelection();
-      const clipboardData =
-        event instanceof InputEvent ? null : event.clipboardData;
-
+      const {clipboardData} = event as ClipboardEvent;
       if (clipboardData != null && $isRangeSelection(selection)) {
         $insertDataTransferForPlainText(clipboardData, selection);
       }
@@ -121,58 +106,7 @@ function onCutForPlainText(
   });
 }
 
-function initializeEditor(
-  editor: LexicalEditor,
-  initialEditorState?: InitialEditorStateType,
-): void {
-  if (initialEditorState === null) {
-    return;
-  } else if (initialEditorState === undefined) {
-    editor.update(() => {
-      const root = $getRoot();
-      if (root.isEmpty()) {
-        const paragraph = $createParagraphNode();
-        root.append(paragraph);
-        const activeElement = document.activeElement;
-
-        if (
-          $getSelection() !== null ||
-          (activeElement !== null && activeElement === editor.getRootElement())
-        ) {
-          paragraph.select();
-        }
-      }
-    }, updateOptions);
-  } else if (initialEditorState !== null) {
-    switch (typeof initialEditorState) {
-      case 'string': {
-        const parsedEditorState = editor.parseEditorState(initialEditorState);
-        editor.setEditorState(parsedEditorState, setEditorOptions);
-        break;
-      }
-
-      case 'object': {
-        editor.setEditorState(initialEditorState, setEditorOptions);
-        break;
-      }
-
-      case 'function': {
-        editor.update(() => {
-          const root = $getRoot();
-          if (root.isEmpty()) {
-            initialEditorState(editor);
-          }
-        }, updateOptions);
-        break;
-      }
-    }
-  }
-}
-
-export function registerPlainText(
-  editor: LexicalEditor,
-  initialEditorState?: InitialEditorStateType,
-): () => void {
+export function registerPlainText(editor: LexicalEditor): () => void {
   const removeListener = mergeRegister(
     editor.registerCommand<boolean>(
       DELETE_CHARACTER_COMMAND,
@@ -340,6 +274,12 @@ export function registerPlainText(
           return false;
         }
 
+        // Exception handling for iOS native behavior instead of Lexical's behavior when using Korean on iOS devices.
+        // more details - https://github.com/facebook/lexical/issues/5841
+        if (IS_IOS && navigator.language === 'ko-KR') {
+          return false;
+        }
+
         event.preventDefault();
         return editor.dispatchCommand(DELETE_CHARACTER_COMMAND, true);
       },
@@ -376,7 +316,10 @@ export function registerPlainText(
           // This can also cause a strange performance issue in
           // Safari, where there is a noticeable pause due to
           // preventing the key down of enter.
-          if ((IS_IOS || IS_SAFARI) && CAN_USE_BEFORE_INPUT) {
+          if (
+            (IS_IOS || IS_SAFARI || IS_APPLE_WEBKIT) &&
+            CAN_USE_BEFORE_INPUT
+          ) {
             return false;
           }
 
@@ -384,6 +327,15 @@ export function registerPlainText(
         }
 
         return editor.dispatchCommand(INSERT_LINE_BREAK_COMMAND, false);
+      },
+      COMMAND_PRIORITY_EDITOR,
+    ),
+    editor.registerCommand(
+      SELECT_ALL_COMMAND,
+      () => {
+        $selectAll();
+
+        return true;
       },
       COMMAND_PRIORITY_EDITOR,
     ),
@@ -460,6 +412,5 @@ export function registerPlainText(
       COMMAND_PRIORITY_EDITOR,
     ),
   );
-  initializeEditor(editor, initialEditorState);
   return removeListener;
 }

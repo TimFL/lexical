@@ -7,13 +7,15 @@
  */
 
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {$insertBlockNode} from '@lexical/utils';
+import {$insertNodeToNearestRoot} from '@lexical/utils';
 import {COMMAND_PRIORITY_EDITOR, createCommand, LexicalCommand} from 'lexical';
 import {useEffect} from 'react';
 
 import {$createTweetNode, TweetNode} from '../../nodes/TweetNode';
 
-export const INSERT_TWEET_COMMAND: LexicalCommand<string> = createCommand();
+export const INSERT_TWEET_COMMAND: LexicalCommand<string> = createCommand(
+  'INSERT_TWEET_COMMAND',
+);
 
 export default function TwitterPlugin(): JSX.Element | null {
   const [editor] = useLexicalComposerContext();
@@ -27,7 +29,7 @@ export default function TwitterPlugin(): JSX.Element | null {
       INSERT_TWEET_COMMAND,
       (payload) => {
         const tweetNode = $createTweetNode(payload);
-        $insertBlockNode(tweetNode);
+        $insertNodeToNearestRoot(tweetNode);
 
         return true;
       },

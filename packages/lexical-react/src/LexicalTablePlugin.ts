@@ -9,32 +9,78 @@
 import type {
   HTMLTableElementWithWithTableSelectionState,
   InsertTableCommandPayload,
-  TableSelection,
+  TableObserver,
 } from '@lexical/table';
-import type {ElementNode, NodeKey} from 'lexical';
+import type {NodeKey} from 'lexical';
 
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {
+  $computeTableMap,
+  $computeTableMapSkipCellCheck,
+  $createTableCellNode,
   $createTableNodeWithDimensions,
+  $getNodeTriplet,
+  $getTableAndElementByKey,
+  $isTableCellNode,
+  $isTableRowNode,
   applyTableHandlers,
+  getTableElement,
   INSERT_TABLE_COMMAND,
+  setScrollableTablesActive,
   TableCellNode,
   TableNode,
   TableRowNode,
 } from '@lexical/table';
 import {
+  $insertFirst,
+  $insertNodeToNearestRoot,
+  mergeRegister,
+} from '@lexical/utils';
+import {
   $createParagraphNode,
-  $getNodeByKey,
-  $getSelection,
-  $isRangeSelection,
-  $isRootNode,
+  $isTextNode,
   COMMAND_PRIORITY_EDITOR,
 } from 'lexical';
 import {useEffect} from 'react';
 import invariant from 'shared/invariant';
 
-export function TablePlugin(): JSX.Element | null {
+export interface TablePluginProps {
+  /**
+   * When `false` (default `true`), merged cell support (colspan and rowspan) will be disabled and all
+   * tables will be forced into a regular grid with 1x1 table cells.
+   */
+  hasCellMerge?: boolean;
+  /**
+   * When `false` (default `true`), the background color of TableCellNode will always be removed.
+   */
+  hasCellBackgroundColor?: boolean;
+  /**
+   * When `true` (default `true`), the tab key can be used to navigate table cells.
+   */
+  hasTabHandler?: boolean;
+  /**
+   * When `true` (default `false`), tables will be wrapped in a `<div>` to enable horizontal scrolling
+   */
+  hasHorizontalScroll?: boolean;
+}
+
+/**
+ * A plugin to enable all of the features of Lexical's TableNode.
+ *
+ * @param props - See type for documentation
+ * @returns An element to render in your LexicalComposer
+ */
+export function TablePlugin({
+  hasCellMerge = true,
+  hasCellBackgroundColor = true,
+  hasTabHandler = true,
+  hasHorizontalScroll = false,
+}: TablePluginProps): JSX.Element | null {
   const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    setScrollableTablesActive(editor, hasHorizontalScroll);
+  }, [editor, hasHorizontalScroll]);
 
   useEffect(() => {
     if (!editor.hasNodes([TableNode, TableCellNode, TableRowNode])) {
@@ -44,85 +90,186 @@ export function TablePlugin(): JSX.Element | null {
       );
     }
 
-    return editor.registerCommand<InsertTableCommandPayload>(
-      INSERT_TABLE_COMMAND,
-      ({columns, rows, includeHeaders}) => {
-        const selection = $getSelection();
-
-        if (!$isRangeSelection(selection)) {
-          return true;
-        }
-
-        const focus = selection.focus;
-        const focusNode = focus.getNode();
-
-        if (focusNode !== null) {
+    return mergeRegister(
+      editor.registerCommand<InsertTableCommandPayload>(
+        INSERT_TABLE_COMMAND,
+        ({columns, rows, includeHeaders}) => {
           const tableNode = $createTableNodeWithDimensions(
             Number(rows),
             Number(columns),
             includeHeaders,
           );
+          $insertNodeToNearestRoot(tableNode);
 
-          if ($isRootNode(focusNode)) {
-            const target = focusNode.getChildAtIndex(focus.offset);
-
-            if (target !== null) {
-              target.insertBefore(tableNode);
-            } else {
-              focusNode.append(tableNode);
-            }
-
-            tableNode.insertBefore($createParagraphNode());
-          } else {
-            const topLevelNode = focusNode.getTopLevelElementOrThrow();
-            topLevelNode.insertAfter(tableNode);
+          const firstDescendant = tableNode.getFirstDescendant();
+          if ($isTextNode(firstDescendant)) {
+            firstDescendant.select();
           }
 
-          tableNode.insertAfter($createParagraphNode());
-          const firstCell = tableNode
-            .getFirstChildOrThrow<ElementNode>()
-            .getFirstChildOrThrow<ElementNode>();
-          firstCell.select();
+          return true;
+        },
+        COMMAND_PRIORITY_EDITOR,
+      ),
+      editor.registerNodeTransform(TableNode, (node) => {
+        const [gridMap] = $computeTableMapSkipCellCheck(node, null, null);
+        const maxRowLength = gridMap.reduce((curLength, row) => {
+          return Math.max(curLength, row.length);
+        }, 0);
+        const rowNodes = node.getChildren();
+        for (let i = 0; i < gridMap.length; ++i) {
+          const rowNode = rowNodes[i];
+          if (!rowNode) {
+            continue;
+          }
+          const rowLength = gridMap[i].reduce(
+            (acc, cell) => (cell ? 1 + acc : acc),
+            0,
+          );
+          if (rowLength === maxRowLength) {
+            continue;
+          }
+          for (let j = rowLength; j < maxRowLength; ++j) {
+            // TODO: inherit header state from another header or body
+            const newCell = $createTableCellNode(0);
+            newCell.append($createParagraphNode());
+            (rowNode as TableRowNode).append(newCell);
+          }
         }
-
-        return true;
-      },
-      COMMAND_PRIORITY_EDITOR,
+      }),
     );
   }, [editor]);
 
   useEffect(() => {
-    const tableSelections = new Map<NodeKey, TableSelection>();
+    const tableSelections = new Map<
+      NodeKey,
+      [TableObserver, HTMLTableElementWithWithTableSelectionState]
+    >();
 
-    return editor.registerMutationListener(TableNode, (nodeMutations) => {
-      for (const [nodeKey, mutation] of nodeMutations) {
-        if (mutation === 'created') {
-          editor.update(() => {
-            const tableElement = editor.getElementByKey(
-              nodeKey,
-            ) as HTMLTableElementWithWithTableSelectionState;
-            const tableNode = $getNodeByKey<TableNode>(nodeKey);
+    const initializeTableNode = (
+      tableNode: TableNode,
+      nodeKey: NodeKey,
+      dom: HTMLElement,
+    ) => {
+      const tableElement = getTableElement(tableNode, dom);
+      const tableSelection = applyTableHandlers(
+        tableNode,
+        tableElement,
+        editor,
+        hasTabHandler,
+      );
+      tableSelections.set(nodeKey, [tableSelection, tableElement]);
+    };
 
-            if (tableElement && tableNode) {
-              const tableSelection = applyTableHandlers(
-                tableNode,
-                tableElement,
-                editor,
-              );
-              tableSelections.set(nodeKey, tableSelection);
+    const unregisterMutationListener = editor.registerMutationListener(
+      TableNode,
+      (nodeMutations) => {
+        editor.getEditorState().read(
+          () => {
+            for (const [nodeKey, mutation] of nodeMutations) {
+              const tableSelection = tableSelections.get(nodeKey);
+              if (mutation === 'created' || mutation === 'updated') {
+                const {tableNode, tableElement} =
+                  $getTableAndElementByKey(nodeKey);
+                if (tableSelection === undefined) {
+                  initializeTableNode(tableNode, nodeKey, tableElement);
+                } else if (tableElement !== tableSelection[1]) {
+                  // The update created a new DOM node, destroy the existing TableObserver
+                  tableSelection[0].removeListeners();
+                  tableSelections.delete(nodeKey);
+                  initializeTableNode(tableNode, nodeKey, tableElement);
+                }
+              } else if (mutation === 'destroyed') {
+                if (tableSelection !== undefined) {
+                  tableSelection[0].removeListeners();
+                  tableSelections.delete(nodeKey);
+                }
+              }
             }
-          });
-        } else if (mutation === 'destroyed') {
-          const tableSelection = tableSelections.get(nodeKey);
+          },
+          {editor},
+        );
+      },
+      {skipInitialization: false},
+    );
 
-          if (tableSelection !== undefined) {
-            tableSelection.removeListeners();
-            tableSelections.delete(nodeKey);
+    return () => {
+      unregisterMutationListener();
+      // Hook might be called multiple times so cleaning up tables listeners as well,
+      // as it'll be reinitialized during recurring call
+      for (const [, [tableSelection]] of tableSelections) {
+        tableSelection.removeListeners();
+      }
+    };
+  }, [editor, hasTabHandler]);
+
+  // Unmerge cells when the feature isn't enabled
+  useEffect(() => {
+    if (hasCellMerge) {
+      return;
+    }
+    return editor.registerNodeTransform(TableCellNode, (node) => {
+      if (node.getColSpan() > 1 || node.getRowSpan() > 1) {
+        // When we have rowSpan we have to map the entire Table to understand where the new Cells
+        // fit best; let's analyze all Cells at once to save us from further transform iterations
+        const [, , gridNode] = $getNodeTriplet(node);
+        const [gridMap] = $computeTableMap(gridNode, node, node);
+        // TODO this function expects Tables to be normalized. Look into this once it exists
+        const rowsCount = gridMap.length;
+        const columnsCount = gridMap[0].length;
+        let row = gridNode.getFirstChild();
+        invariant(
+          $isTableRowNode(row),
+          'Expected TableNode first child to be a RowNode',
+        );
+        const unmerged = [];
+        for (let i = 0; i < rowsCount; i++) {
+          if (i !== 0) {
+            row = row.getNextSibling();
+            invariant(
+              $isTableRowNode(row),
+              'Expected TableNode first child to be a RowNode',
+            );
           }
+          let lastRowCell: null | TableCellNode = null;
+          for (let j = 0; j < columnsCount; j++) {
+            const cellMap = gridMap[i][j];
+            const cell = cellMap.cell;
+            if (cellMap.startRow === i && cellMap.startColumn === j) {
+              lastRowCell = cell;
+              unmerged.push(cell);
+            } else if (cell.getColSpan() > 1 || cell.getRowSpan() > 1) {
+              invariant(
+                $isTableCellNode(cell),
+                'Expected TableNode cell to be a TableCellNode',
+              );
+              const newCell = $createTableCellNode(cell.__headerState);
+              if (lastRowCell !== null) {
+                lastRowCell.insertAfter(newCell);
+              } else {
+                $insertFirst(row, newCell);
+              }
+            }
+          }
+        }
+        for (const cell of unmerged) {
+          cell.setColSpan(1);
+          cell.setRowSpan(1);
         }
       }
     });
-  }, [editor]);
+  }, [editor, hasCellMerge]);
+
+  // Remove cell background color when feature is disabled
+  useEffect(() => {
+    if (hasCellBackgroundColor) {
+      return;
+    }
+    return editor.registerNodeTransform(TableCellNode, (node) => {
+      if (node.getBackgroundColor() !== null) {
+        node.setBackgroundColor(null);
+      }
+    });
+  }, [editor, hasCellBackgroundColor, hasCellMerge]);
 
   return null;
 }

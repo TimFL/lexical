@@ -1,4 +1,3 @@
-/** @module @lexical/yjs */
 /**
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
@@ -9,7 +8,6 @@
 
 import type {Binding} from './Bindings';
 import type {LexicalCommand} from 'lexical';
-import type {WebsocketProvider} from 'y-websocket';
 import type {Doc, RelativePosition, UndoManager, XmlText} from 'yjs';
 
 import {createCommand} from 'lexical';
@@ -21,15 +19,21 @@ export type UserState = {
   focusing: boolean;
   focusPos: null | RelativePosition;
   name: string;
+  awarenessData: object;
+  [key: string]: unknown;
 };
-export const CONNECTED_COMMAND: LexicalCommand<boolean> = createCommand();
-export const TOGGLE_CONNECT_COMMAND: LexicalCommand<boolean> = createCommand();
+export const CONNECTED_COMMAND: LexicalCommand<boolean> =
+  createCommand('CONNECTED_COMMAND');
+export const TOGGLE_CONNECT_COMMAND: LexicalCommand<boolean> = createCommand(
+  'TOGGLE_CONNECT_COMMAND',
+);
 export type ProviderAwareness = {
   getLocalState: () => UserState | null;
   getStates: () => Map<number, UserState>;
   off: (type: 'update', cb: () => void) => void;
   on: (type: 'update', cb: () => void) => void;
   setLocalState: (arg0: UserState) => void;
+  setLocalStateField: (field: string, value: unknown) => void;
 };
 declare interface Provider {
   awareness: ProviderAwareness;
@@ -54,7 +58,7 @@ export type Delta = Array<Operation>;
 export type YjsNode = Record<string, unknown>;
 export type YjsEvent = Record<string, unknown>;
 export type {Provider};
-export type {Binding, ClientID} from './Bindings';
+export type {Binding, ClientID, ExcludedProperties} from './Bindings';
 export {createBinding} from './Bindings';
 
 export function createUndoManager(
@@ -67,13 +71,15 @@ export function createUndoManager(
 }
 
 export function initLocalState(
-  provider: WebsocketProvider,
+  provider: Provider,
   name: string,
   color: string,
   focusing: boolean,
+  awarenessData: object,
 ): void {
   provider.awareness.setLocalState({
     anchorPos: null,
+    awarenessData,
     color,
     focusPos: null,
     focusing: focusing,
@@ -82,10 +88,11 @@ export function initLocalState(
 }
 
 export function setLocalStateFocus(
-  provider: WebsocketProvider,
+  provider: Provider,
   name: string,
   color: string,
   focusing: boolean,
+  awarenessData: object,
 ): void {
   const {awareness} = provider;
   let localState = awareness.getLocalState();
@@ -93,6 +100,7 @@ export function setLocalStateFocus(
   if (localState === null) {
     localState = {
       anchorPos: null,
+      awarenessData,
       color,
       focusPos: null,
       focusing: focusing,

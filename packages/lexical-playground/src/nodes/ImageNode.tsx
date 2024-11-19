@@ -19,14 +19,11 @@ import type {
   Spread,
 } from 'lexical';
 
-import {createEditor, DecoratorNode} from 'lexical';
+import {$applyNodeReplacement, createEditor, DecoratorNode} from 'lexical';
 import * as React from 'react';
 import {Suspense} from 'react';
 
-const ImageComponent = React.lazy(
-  // @ts-ignore
-  () => import('./ImageComponent'),
-);
+const ImageComponent = React.lazy(() => import('./ImageComponent'));
 
 export interface ImagePayload {
   altText: string;
@@ -37,15 +34,26 @@ export interface ImagePayload {
   showCaption?: boolean;
   src: string;
   width?: number;
+  captionsEnabled?: boolean;
 }
 
-function convertImageElement(domNode: Node): null | DOMConversionOutput {
-  if (domNode instanceof HTMLImageElement) {
-    const {alt: altText, src} = domNode;
-    const node = $createImageNode({altText, src});
-    return {node};
+function isGoogleDocCheckboxImg(img: HTMLImageElement): boolean {
+  return (
+    img.parentElement != null &&
+    img.parentElement.tagName === 'LI' &&
+    img.previousSibling === null &&
+    img.getAttribute('aria-roledescription') === 'checkbox'
+  );
+}
+
+function $convertImageElement(domNode: Node): null | DOMConversionOutput {
+  const img = domNode as HTMLImageElement;
+  if (img.src.startsWith('file:///') || isGoogleDocCheckboxImg(img)) {
+    return null;
   }
-  return null;
+  const {alt: altText, src, width, height} = img;
+  const node = $createImageNode({altText, height, src, width});
+  return {node};
 }
 
 export type SerializedImageNode = Spread<
@@ -57,8 +65,6 @@ export type SerializedImageNode = Spread<
     showCaption: boolean;
     src: string;
     width?: number;
-    type: 'image';
-    version: 1;
   },
   SerializedLexicalNode
 >;
@@ -71,6 +77,8 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
   __maxWidth: number;
   __showCaption: boolean;
   __caption: LexicalEditor;
+  // Captions cannot yet be used within editor cells
+  __captionsEnabled: boolean;
 
   static getType(): string {
     return 'image';
@@ -85,6 +93,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
       node.__height,
       node.__showCaption,
       node.__caption,
+      node.__captionsEnabled,
       node.__key,
     );
   }
@@ -112,13 +121,15 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     const element = document.createElement('img');
     element.setAttribute('src', this.__src);
     element.setAttribute('alt', this.__altText);
+    element.setAttribute('width', this.__width.toString());
+    element.setAttribute('height', this.__height.toString());
     return {element};
   }
 
   static importDOM(): DOMConversionMap | null {
     return {
       img: (node: Node) => ({
-        conversion: convertImageElement,
+        conversion: $convertImageElement,
         priority: 0,
       }),
     };
@@ -132,6 +143,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     height?: 'inherit' | number,
     showCaption?: boolean,
     caption?: LexicalEditor,
+    captionsEnabled?: boolean,
     key?: NodeKey,
   ) {
     super(key);
@@ -141,7 +153,12 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     this.__width = width || 'inherit';
     this.__height = height || 'inherit';
     this.__showCaption = showCaption || false;
-    this.__caption = caption || createEditor();
+    this.__caption =
+      caption ||
+      createEditor({
+        nodes: [],
+      });
+    this.__captionsEnabled = captionsEnabled || captionsEnabled === undefined;
   }
 
   exportJSON(): SerializedImageNode {
@@ -208,6 +225,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
           nodeKey={this.getKey()}
           showCaption={this.__showCaption}
           caption={this.__caption}
+          captionsEnabled={this.__captionsEnabled}
           resizable={true}
         />
       </Suspense>
@@ -219,21 +237,25 @@ export function $createImageNode({
   altText,
   height,
   maxWidth = 500,
+  captionsEnabled,
   src,
   width,
   showCaption,
   caption,
   key,
 }: ImagePayload): ImageNode {
-  return new ImageNode(
-    src,
-    altText,
-    maxWidth,
-    width,
-    height,
-    showCaption,
-    caption,
-    key,
+  return $applyNodeReplacement(
+    new ImageNode(
+      src,
+      altText,
+      maxWidth,
+      width,
+      height,
+      showCaption,
+      caption,
+      captionsEnabled,
+      key,
+    ),
   );
 }
 

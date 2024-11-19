@@ -34,7 +34,7 @@ function PortalImpl({
   useEffect(() => {
     let modalOverlayElement: HTMLElement | null = null;
     const handler = (event: KeyboardEvent) => {
-      if (event.keyCode === 27) {
+      if (event.key === 'Escape') {
         onClose();
       }
     };
@@ -48,10 +48,11 @@ function PortalImpl({
         onClose();
       }
     };
-    if (modalRef.current !== null) {
-      modalOverlayElement = modalRef.current?.parentElement;
+    const modelElement = modalRef.current;
+    if (modelElement !== null) {
+      modalOverlayElement = modelElement.parentElement;
       if (modalOverlayElement !== null) {
-        modalOverlayElement?.addEventListener('click', clickOutsideHandler);
+        modalOverlayElement.addEventListener('click', clickOutsideHandler);
       }
     }
 

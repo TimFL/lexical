@@ -5,15 +5,19 @@
  * LICENSE file in the root directory of this source tree.
  *
  */
+import type {TableOfContentsEntry} from '@lexical/react/LexicalTableOfContentsPlugin';
 import type {HeadingTagType} from '@lexical/rich-text';
 import type {NodeKey} from 'lexical';
 
 import './index.css';
 
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import LexicalTableOfContents__EXPERIMENTAL from '@lexical/react/LexicalTableOfContents__EXPERIMENTAL';
+import {TableOfContentsPlugin as LexicalTableOfContentsPlugin} from '@lexical/react/LexicalTableOfContentsPlugin';
 import {useEffect, useRef, useState} from 'react';
 import * as React from 'react';
+
+const MARGIN_ABOVE_EDITOR = 624;
+const HEADING_WIDTH = 9;
 
 function indent(tagName: HeadingTagType) {
   if (tagName === 'h2') {
@@ -23,10 +27,26 @@ function indent(tagName: HeadingTagType) {
   }
 }
 
+function isHeadingAtTheTopOfThePage(element: HTMLElement): boolean {
+  const elementYPosition = element?.getClientRects()[0].y;
+  return (
+    elementYPosition >= MARGIN_ABOVE_EDITOR &&
+    elementYPosition <= MARGIN_ABOVE_EDITOR + HEADING_WIDTH
+  );
+}
+function isHeadingAboveViewport(element: HTMLElement): boolean {
+  const elementYPosition = element?.getClientRects()[0].y;
+  return elementYPosition < MARGIN_ABOVE_EDITOR;
+}
+function isHeadingBelowTheTopOfThePage(element: HTMLElement): boolean {
+  const elementYPosition = element?.getClientRects()[0].y;
+  return elementYPosition >= MARGIN_ABOVE_EDITOR + HEADING_WIDTH;
+}
+
 function TableOfContentsList({
   tableOfContents,
 }: {
-  tableOfContents: Array<[key: NodeKey, text: string, tag: HeadingTagType]>;
+  tableOfContents: Array<TableOfContentsEntry>;
 }): JSX.Element {
   const [selectedKey, setSelectedKey] = useState('');
   const selectedIndex = useRef(0);
@@ -41,18 +61,6 @@ function TableOfContentsList({
         selectedIndex.current = currIndex;
       }
     });
-  }
-  function isHeadingAtTheTopOfThePage(element: HTMLElement): boolean {
-    const elementYPosition = element?.getClientRects()[0].y;
-    return elementYPosition >= 0.26 && elementYPosition <= 9;
-  }
-  function isHeadingAboveViewport(element: HTMLElement): boolean {
-    const elementYPosition = element?.getClientRects()[0].y;
-    return elementYPosition <= 0;
-  }
-  function isHeadingBelowTheTopOfThePage(element: HTMLElement): boolean {
-    const elementYPosition = element?.getClientRects()[0].y;
-    return elementYPosition > 9;
   }
 
   useEffect(() => {
@@ -134,10 +142,9 @@ function TableOfContentsList({
         {tableOfContents.map(([key, text, tag], index) => {
           if (index === 0) {
             return (
-              <div className="normal-heading-wrapper">
+              <div className="normal-heading-wrapper" key={key}>
                 <div
                   className="first-heading"
-                  key={key}
                   onClick={() => scrollToNode(key, index)}
                   role="button"
                   tabIndex={0}>
@@ -153,9 +160,9 @@ function TableOfContentsList({
               <div
                 className={`normal-heading-wrapper ${
                   selectedKey === key ? 'selected-heading-wrapper' : ''
-                }`}>
+                }`}
+                key={key}>
                 <div
-                  key={key}
                   onClick={() => scrollToNode(key, index)}
                   role="button"
                   className={indent(tag)}
@@ -181,10 +188,10 @@ function TableOfContentsList({
 
 export default function TableOfContentsPlugin() {
   return (
-    <LexicalTableOfContents__EXPERIMENTAL>
+    <LexicalTableOfContentsPlugin>
       {(tableOfContents) => {
         return <TableOfContentsList tableOfContents={tableOfContents} />;
       }}
-    </LexicalTableOfContents__EXPERIMENTAL>
+    </LexicalTableOfContentsPlugin>
   );
 }

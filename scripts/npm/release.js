@@ -12,22 +12,40 @@
 
 const readline = require('readline');
 const {exec} = require('child-process-promise');
-const {LEXICAL_PKG, DEFAULT_PKGS} = require('./packages');
+const {packagesManager} = require('../shared/packagesManager');
+const argv = require('minimist')(process.argv.slice(2));
+
+const nonInteractive = argv['non-interactive'];
+const dryRun = argv['dry-run'];
+const channel = argv.channel;
+const validChannels = new Set(['next', 'latest', 'nightly', 'dev']);
+if (!validChannels.has(channel)) {
+  console.error(`Invalid release channel: ${channel}`);
+  process.exit(1);
+}
 
 async function publish() {
-  const pkgs = [LEXICAL_PKG, ...DEFAULT_PKGS];
+  const pkgs = packagesManager.getPublicPackages();
+  if (!nonInteractive) {
+    console.info(
+      `You're about to publish:
+    ${pkgs.map((pkg) => pkg.getNpmName()).join('\n')}
 
-  console.info(
-    `You're about to publish:
-${pkgs.join('\n')}
+    Type "publish" to confirm.`,
+    );
+    await waitForInput();
+  }
 
-Type "publish" to confirm.`,
-  );
-  await waitForInput();
-
-  for (let i = 0; i < pkgs.length; i++) {
-    const pkg = pkgs[i];
-    await exec(`cd ./packages/${pkg}/npm && npm publish --access public`);
+  for (const pkg of pkgs) {
+    console.info(`Publishing ${pkg.getNpmName()}...`);
+    if (dryRun === undefined || dryRun === 0) {
+      await exec(
+        `cd ./packages/${pkg.getDirectoryName()}/npm && npm publish --access public --tag ${channel}`,
+      );
+      console.info(`Done!`);
+    } else {
+      console.info(`Dry run - skipping publish step.`);
+    }
   }
 }
 

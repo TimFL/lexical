@@ -40,9 +40,17 @@ export function useLexicalNodeSelection(
   );
 
   useEffect(() => {
-    return editor.registerUpdateListener(() => {
-      setIsSelected(isNodeSelected(editor, key));
+    let isMounted = true;
+    const unregister = editor.registerUpdateListener(() => {
+      if (isMounted) {
+        setIsSelected(isNodeSelected(editor, key));
+      }
     });
+
+    return () => {
+      isMounted = false;
+      unregister();
+    };
   }, [editor, key]);
 
   const setSelected = useCallback(
@@ -54,11 +62,12 @@ export function useLexicalNodeSelection(
           selection = $createNodeSelection();
           $setSelection(selection);
         }
-
-        if (selected) {
-          selection.add(key);
-        } else {
-          selection.delete(key);
+        if ($isNodeSelection(selection)) {
+          if (selected) {
+            selection.add(key);
+          } else {
+            selection.delete(key);
+          }
         }
       });
     },

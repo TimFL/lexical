@@ -7,11 +7,10 @@
  */
 
 import type {
+  BaseSelection,
   EditorConfig,
-  GridSelection,
   LexicalNode,
   NodeKey,
-  NodeSelection,
   RangeSelection,
   SerializedElementNode,
   Spread,
@@ -21,13 +20,11 @@ import {
   addClassNamesToElement,
   removeClassNamesFromElement,
 } from '@lexical/utils';
-import {$isElementNode, $isRangeSelection, ElementNode} from 'lexical';
+import {$applyNodeReplacement, $isRangeSelection, ElementNode} from 'lexical';
 
 export type SerializedMarkNode = Spread<
   {
     ids: Array<string>;
-    type: 'mark';
-    version: 1;
   },
   SerializedElementNode
 >;
@@ -35,14 +32,14 @@ export type SerializedMarkNode = Spread<
 /** @noInheritDoc */
 export class MarkNode extends ElementNode {
   /** @internal */
-  __ids: Array<string>;
+  __ids: readonly string[];
 
   static getType(): string {
     return 'mark';
   }
 
   static clone(node: MarkNode): MarkNode {
-    return new MarkNode(Array.from(node.__ids), node.__key);
+    return new MarkNode(node.__ids, node.__key);
   }
 
   static importDOM(): null {
@@ -60,13 +57,13 @@ export class MarkNode extends ElementNode {
   exportJSON(): SerializedMarkNode {
     return {
       ...super.exportJSON(),
-      ids: this.getIDs(),
+      ids: Array.from(this.getIDs()),
       type: 'mark',
       version: 1,
     };
   }
 
-  constructor(ids: Array<string>, key?: NodeKey) {
+  constructor(ids: readonly string[], key?: NodeKey) {
     super(key);
     this.__ids = ids || [];
   }
@@ -115,17 +112,19 @@ export class MarkNode extends ElementNode {
 
   getIDs(): Array<string> {
     const self = this.getLatest();
-    return $isMarkNode(self) ? self.__ids : [];
+    return $isMarkNode(self) ? Array.from(self.__ids) : [];
   }
 
   addID(id: string): void {
     const self = this.getWritable();
     if ($isMarkNode(self)) {
-      const ids = self.__ids;
+      const ids = Array.from(self.__ids);
       self.__ids = ids;
       for (let i = 0; i < ids.length; i++) {
         // If we already have it, don't add again
-        if (id === ids[i]) return;
+        if (id === ids[i]) {
+          return;
+        }
       }
       ids.push(id);
     }
@@ -134,7 +133,7 @@ export class MarkNode extends ElementNode {
   deleteID(id: string): void {
     const self = this.getWritable();
     if ($isMarkNode(self)) {
-      const ids = self.__ids;
+      const ids = Array.from(self.__ids);
       self.__ids = ids;
       for (let i = 0; i < ids.length; i++) {
         if (id === ids[i]) {
@@ -145,14 +144,13 @@ export class MarkNode extends ElementNode {
     }
   }
 
-  insertNewAfter(selection: RangeSelection): null | ElementNode {
-    const element = this.getParentOrThrow().insertNewAfter(selection);
-    if ($isElementNode(element)) {
-      const markNode = $createMarkNode(this.__ids);
-      element.append(markNode);
-      return markNode;
-    }
-    return null;
+  insertNewAfter(
+    selection: RangeSelection,
+    restoreSelection = true,
+  ): null | ElementNode {
+    const markNode = $createMarkNode(this.__ids);
+    this.insertAfter(markNode, restoreSelection);
+    return markNode;
   }
 
   canInsertTextBefore(): false {
@@ -173,7 +171,7 @@ export class MarkNode extends ElementNode {
 
   extractWithChild(
     child: LexicalNode,
-    selection: RangeSelection | NodeSelection | GridSelection,
+    selection: BaseSelection,
     destination: 'clone' | 'html',
   ): boolean {
     if (!$isRangeSelection(selection) || destination === 'html') {
@@ -199,8 +197,8 @@ export class MarkNode extends ElementNode {
   }
 }
 
-export function $createMarkNode(ids: Array<string>): MarkNode {
-  return new MarkNode(ids);
+export function $createMarkNode(ids: readonly string[]): MarkNode {
+  return $applyNodeReplacement(new MarkNode(ids));
 }
 
 export function $isMarkNode(node: LexicalNode | null): node is MarkNode {

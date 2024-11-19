@@ -6,29 +6,27 @@
  *
  */
 
-import type {Spread} from 'lexical';
-
 import {
-  DOMConversionMap,
-  DOMConversionOutput,
-  DOMExportOutput,
-  EditorConfig,
-  LexicalNode,
-  NodeKey,
-  SerializedTextNode,
+  $applyNodeReplacement,
+  type DOMConversionMap,
+  type DOMConversionOutput,
+  type DOMExportOutput,
+  type EditorConfig,
+  type LexicalNode,
+  type NodeKey,
+  type SerializedTextNode,
+  type Spread,
   TextNode,
 } from 'lexical';
 
 export type SerializedMentionNode = Spread<
   {
     mentionName: string;
-    type: 'mention';
-    version: 1;
   },
   SerializedTextNode
 >;
 
-function convertMentionElement(
+function $convertMentionElement(
   domNode: HTMLElement,
 ): DOMConversionOutput | null {
   const textContent = domNode.textContent;
@@ -82,6 +80,7 @@ export class MentionNode extends TextNode {
     const dom = super.createDOM(config);
     dom.style.cssText = mentionStyle;
     dom.className = 'mention';
+    dom.spellcheck = false;
     return dom;
   }
 
@@ -99,7 +98,7 @@ export class MentionNode extends TextNode {
           return null;
         }
         return {
-          conversion: convertMentionElement,
+          conversion: $convertMentionElement,
           priority: 1,
         };
       },
@@ -109,12 +108,20 @@ export class MentionNode extends TextNode {
   isTextEntity(): true {
     return true;
   }
+
+  canInsertTextBefore(): boolean {
+    return false;
+  }
+
+  canInsertTextAfter(): boolean {
+    return false;
+  }
 }
 
 export function $createMentionNode(mentionName: string): MentionNode {
   const mentionNode = new MentionNode(mentionName);
   mentionNode.setMode('segmented').toggleDirectionless();
-  return mentionNode;
+  return $applyNodeReplacement(mentionNode);
 }
 
 export function $isMentionNode(

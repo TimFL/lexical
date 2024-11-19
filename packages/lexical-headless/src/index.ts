@@ -1,4 +1,3 @@
-/** @module @lexical/headless */
 /**
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
@@ -7,26 +6,19 @@
  *
  */
 
-import type {
-  EditorState,
-  EditorThemeClasses,
-  Klass,
-  LexicalEditor,
-  LexicalNode,
-} from 'lexical';
+import type {CreateEditorArgs, LexicalEditor} from 'lexical';
 
 import {createEditor} from 'lexical';
 
-export function createHeadlessEditor(editorConfig?: {
-  disableEvents?: boolean;
-  editorState?: EditorState;
-  namespace: string;
-  nodes?: ReadonlyArray<Klass<LexicalNode>>;
-  onError: (error: Error) => void;
-  parentEditor?: LexicalEditor;
-  readOnly?: boolean;
-  theme?: EditorThemeClasses;
-}): LexicalEditor {
+/**
+ * Generates a headless editor that allows lexical to be used without the need for a DOM, eg in Node.js.
+ * Throws an error when unsupported methods are used.
+ * @param editorConfig - The optional lexical editor configuration.
+ * @returns - The configured headless editor.
+ */
+export function createHeadlessEditor(
+  editorConfig?: CreateEditorArgs,
+): LexicalEditor {
   const editor = createEditor(editorConfig);
   editor._headless = true;
 

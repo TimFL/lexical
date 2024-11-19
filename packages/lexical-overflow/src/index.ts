@@ -1,4 +1,3 @@
-/** @module @lexical/overflow */
 /**
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
@@ -13,18 +12,12 @@ import type {
   NodeKey,
   RangeSelection,
   SerializedElementNode,
-  Spread,
 } from 'lexical';
 
-import {ElementNode} from 'lexical';
+import {$applyNodeReplacement, ElementNode} from 'lexical';
+import invariant from 'shared/invariant';
 
-export type SerializedOverflowNode = Spread<
-  {
-    type: 'overflow';
-    version: 1;
-  },
-  SerializedElementNode
->;
+export type SerializedOverflowNode = SerializedElementNode;
 
 /** @noInheritDoc */
 export class OverflowNode extends ElementNode {
@@ -69,18 +62,30 @@ export class OverflowNode extends ElementNode {
     return false;
   }
 
-  insertNewAfter(selection: RangeSelection): null | LexicalNode {
+  insertNewAfter(
+    selection: RangeSelection,
+    restoreSelection = true,
+  ): null | LexicalNode {
     const parent = this.getParentOrThrow();
-    return parent.insertNewAfter(selection);
+    return parent.insertNewAfter(selection, restoreSelection);
   }
 
   excludeFromCopy(): boolean {
     return true;
   }
+
+  static transform(): (node: LexicalNode) => void {
+    return (node: LexicalNode) => {
+      invariant($isOverflowNode(node), 'node is not a OverflowNode');
+      if (node.isEmpty()) {
+        node.remove();
+      }
+    };
+  }
 }
 
 export function $createOverflowNode(): OverflowNode {
-  return new OverflowNode();
+  return $applyNodeReplacement(new OverflowNode());
 }
 
 export function $isOverflowNode(

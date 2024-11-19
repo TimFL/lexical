@@ -7,13 +7,22 @@
  * @flow strict
  */
 
-import type {NodeKey, RangeSelection, TextNode} from 'lexical';
+import type {
+  NodeKey,
+  RangeSelection,
+  TextNode,
+  SerializedElementNode,
+} from 'lexical';
 import {ElementNode, LexicalNode} from 'lexical';
+
+export type SerializedMarkNode = SerializedElementNode & {
+  ids: Array<string>,
+};
 
 declare export class MarkNode extends ElementNode {
   __ids: Array<string>;
 
-  static clone(node: MarkNode): MarkNode;
+  static clone(node: this): MarkNode;
   constructor(ids: Array<string>, key?: NodeKey): void;
 
   hasID(id: string): boolean;
@@ -27,7 +36,7 @@ declare export class MarkNode extends ElementNode {
 
 declare export function $isMarkNode(
   node: ?LexicalNode,
-): boolean %checks(node instanceof MarkNode);
+): node is MarkNode;
 
 declare export function $createMarkNode(ids: Array<string>): MarkNode;
 
@@ -40,6 +49,7 @@ declare export function $wrapSelectionInMarkNode(
   selection: RangeSelection,
   isBackward: boolean,
   id: string,
+  createNode?: (ids: Array<string>) => MarkNode,
 ): void;
 
 declare export function $unwrapMarkNode(node: MarkNode): void;

@@ -6,46 +6,57 @@
  *
  */
 
-import {InitialEditorStateType} from '@lexical/plain-text';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
+import {useLexicalEditable} from '@lexical/react/useLexicalEditable';
 import * as React from 'react';
-import warnOnlyOnce from 'shared/warnOnlyOnce';
 
 import {useCanShowPlaceholder} from './shared/useCanShowPlaceholder';
-import {useDecorators} from './shared/useDecorators';
+import {ErrorBoundaryType, useDecorators} from './shared/useDecorators';
 import {usePlainTextSetup} from './shared/usePlainTextSetup';
-
-const deprecatedInitialEditorStateWarning = warnOnlyOnce(
-  '`initialEditorState` on `PlainTextPlugin` is deprecated and will be removed soon. Use the `initialConfig.editorState` prop on the `LexicalComposer` instead.',
-);
 
 export function PlainTextPlugin({
   contentEditable,
-  placeholder,
-  initialEditorState,
+  // TODO Remove. This property is now part of ContentEditable
+  placeholder = null,
+  ErrorBoundary,
 }: {
   contentEditable: JSX.Element;
-  // TODO Remove in 0.4
-  initialEditorState?: InitialEditorStateType;
-  placeholder: JSX.Element | string;
+  placeholder?:
+    | ((isEditable: boolean) => null | JSX.Element)
+    | null
+    | JSX.Element;
+  ErrorBoundary: ErrorBoundaryType;
 }): JSX.Element {
-  if (
-    __DEV__ &&
-    deprecatedInitialEditorStateWarning &&
-    initialEditorState !== undefined
-  ) {
-    deprecatedInitialEditorStateWarning();
-  }
   const [editor] = useLexicalComposerContext();
-  const showPlaceholder = useCanShowPlaceholder(editor);
-  const decorators = useDecorators(editor);
-  usePlainTextSetup(editor, initialEditorState);
+  const decorators = useDecorators(editor, ErrorBoundary);
+  usePlainTextSetup(editor);
 
   return (
     <>
       {contentEditable}
-      {showPlaceholder && placeholder}
+      <Placeholder content={placeholder} />
       {decorators}
     </>
   );
+}
+
+// TODO Remove
+function Placeholder({
+  content,
+}: {
+  content: ((isEditable: boolean) => null | JSX.Element) | null | JSX.Element;
+}): null | JSX.Element {
+  const [editor] = useLexicalComposerContext();
+  const showPlaceholder = useCanShowPlaceholder(editor);
+  const editable = useLexicalEditable();
+
+  if (!showPlaceholder) {
+    return null;
+  }
+
+  if (typeof content === 'function') {
+    return content(editable);
+  } else {
+    return content;
+  }
 }

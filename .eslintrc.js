@@ -11,11 +11,17 @@
 const restrictedGlobals = require('confusing-browser-globals');
 
 const OFF = 0;
+const WARN = 1;
 const ERROR = 2;
 
 module.exports = {
   // Prettier must be last so it can override other configs (https://github.com/prettier/eslint-config-prettier#installation)
-  extends: ['fbjs', 'plugin:react-hooks/recommended', 'prettier'],
+  extends: [
+    'fbjs',
+    'plugin:react-hooks/recommended',
+    'plugin:lexical/all',
+    'prettier',
+  ],
 
   globals: {
     JSX: true,
@@ -31,7 +37,7 @@ module.exports = {
         'packages/*/__tests__/**/*.?(m)js',
         'packages/*/src/**/*.jsx',
       ],
-      parser: 'babel-eslint',
+      parser: '@babel/eslint-parser',
       parserOptions: {
         allowImportExportEverywhere: true,
         sourceType: 'module',
@@ -46,6 +52,8 @@ module.exports = {
       // node scripts should be console logging so don't lint against that
       files: ['scripts/**/*.js'],
       rules: {
+        // https://github.com/Stuk/eslint-plugin-header/issues/39
+        'header/header': OFF,
         'no-console': OFF,
       },
     },
@@ -57,6 +65,7 @@ module.exports = {
         'eslint:recommended',
         'plugin:@typescript-eslint/eslint-recommended',
         'plugin:@typescript-eslint/recommended',
+        'plugin:@lexical/all',
       ],
       files: ['**/*.ts', '**/*.tsx'],
       parser: '@typescript-eslint/parser',
@@ -65,6 +74,18 @@ module.exports = {
       },
       plugins: ['react', '@typescript-eslint', 'header'],
       rules: {
+        '@lexical/rules-of-lexical': [
+          WARN,
+          /** @type import('./packages/lexical-eslint-plugin/src').RulesOfLexicalOptions */ ({
+            isDollarFunction: ['^INTERNAL_\\$'],
+            isIgnoredFunction: [
+              // @lexical/yjs
+              'createBinding',
+            ],
+            isLexicalProvider: ['updateEditor'],
+            isSafeDollarFunction: '$createRootNode',
+          }),
+        ],
         '@typescript-eslint/ban-ts-comment': OFF,
         '@typescript-eslint/no-this-alias': OFF,
         '@typescript-eslint/no-unused-vars': [ERROR, {args: 'none'}],
@@ -72,15 +93,49 @@ module.exports = {
       },
     },
     {
-      // don't lint headers in entrypoint files so we can add TypeDoc module comments
-      files: ['packages/**/src/index.ts'],
+      files: [
+        // These aren't compiled, but they're written in module JS
+        'packages/lexical-playground/esm/*.mjs',
+      ],
+      parserOptions: {
+        sourceType: 'module',
+      },
+    },
+    {
+      files: [
+        'packages/**/src/__tests__/**',
+        'packages/lexical-playground/**',
+        'packages/lexical-devtools/**',
+      ],
       rules: {
-        'header/header': OFF,
+        'lexical/no-optional-chaining': OFF,
+      },
+    },
+    {
+      files: [
+        'packages/*/src/index.ts',
+        'packages/*/src/index.tsx',
+        'packages/lexical-react/src/*.ts',
+        'packages/lexical-react/src/*.tsx',
+      ],
+      rules: {
+        'no-restricted-exports': [
+          'error',
+          {
+            restrictDefaultExports: {
+              defaultFrom: true,
+              direct: true,
+              named: true,
+              namedFrom: true,
+              namespaceFrom: true,
+            },
+          },
+        ],
       },
     },
   ],
 
-  parser: 'babel-eslint',
+  parser: '@babel/eslint-parser',
 
   parserOptions: {
     ecmaFeatures: {
@@ -101,6 +156,8 @@ module.exports = {
     'no-function-declare-after-return',
     'react',
     'no-only-tests',
+    'lexical',
+    '@lexical',
   ],
 
   // Stop ESLint from looking for a configuration file in parent folders
@@ -110,8 +167,8 @@ module.exports = {
   rules: {
     'accessor-pairs': OFF,
 
-    'brace-style': [ERROR, '1tbs'],
     'consistent-return': OFF,
+    curly: [ERROR, 'all'],
     'dot-location': [ERROR, 'property'],
     // We use console['error']() as a signal to not transform it:
     'dot-notation': [ERROR, {allowPattern: '^(error|warn)$'}],
@@ -119,9 +176,9 @@ module.exports = {
     'eol-last': ERROR,
     eqeqeq: [ERROR, 'allow-null'],
     // Prettier forces semicolons in a few places
-    'flowtype/object-type-delimiter': OFF,
+    'ft-flow/object-type-delimiter': OFF,
 
-    'flowtype/sort-keys': ERROR,
+    'ft-flow/sort-keys': ERROR,
 
     'header/header': [2, 'scripts/www/headerTemplate.js'],
 
@@ -197,7 +254,8 @@ module.exports = {
 
     'react/jsx-tag-spacing': ERROR,
 
-    'react/jsx-uses-react': ERROR,
+    // This hasn't been necessary since React 17
+    'react/jsx-uses-react': OFF,
 
     // We don't care to do this
     'react/jsx-wrap-multilines': [
@@ -207,8 +265,8 @@ module.exports = {
 
     'react/no-is-mounted': OFF,
 
-    // This isn't useful in our test code
-    'react/react-in-jsx-scope': ERROR,
+    // This hasn't been necessary since React 17
+    'react/react-in-jsx-scope': OFF,
 
     'react/self-closing-comp': ERROR,
 

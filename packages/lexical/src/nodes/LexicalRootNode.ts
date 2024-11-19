@@ -6,7 +6,7 @@
  *
  */
 
-import type {LexicalNode} from '../LexicalNode';
+import type {LexicalNode, SerializedLexicalNode} from '../LexicalNode';
 import type {SerializedElementNode} from './LexicalElementNode';
 
 import invariant from 'shared/invariant';
@@ -17,7 +17,9 @@ import {$getRoot} from '../LexicalUtils';
 import {$isDecoratorNode} from './LexicalDecoratorNode';
 import {$isElementNode, ElementNode} from './LexicalElementNode';
 
-export type SerializedRootNode = SerializedElementNode;
+export type SerializedRootNode<
+  T extends SerializedLexicalNode = SerializedLexicalNode,
+> = SerializedElementNode<T>;
 
 /** @noInheritDoc */
 export class RootNode extends ElementNode {
@@ -44,20 +46,17 @@ export class RootNode extends ElementNode {
     );
   }
 
-  getTextContent(includeInert?: boolean, includeDirectionless?: false): string {
+  getTextContent(): string {
     const cachedText = this.__cachedText;
     if (
       isCurrentlyReadOnlyMode() ||
       getActiveEditor()._dirtyType === NO_DIRTY_NODES
     ) {
-      if (
-        cachedText !== null &&
-        (!includeInert || includeDirectionless !== false)
-      ) {
+      if (cachedText !== null) {
         return cachedText;
       }
     }
-    return super.getTextContent(includeInert, includeDirectionless);
+    return super.getTextContent();
   }
 
   remove(): never {
@@ -115,6 +114,10 @@ export class RootNode extends ElementNode {
       type: 'root',
       version: 1,
     };
+  }
+
+  collapseAtStart(): true {
+    return true;
   }
 }
 

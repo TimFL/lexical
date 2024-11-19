@@ -13,7 +13,12 @@ import type {
   TextModeType,
 } from './nodes/LexicalTextNode';
 
-import {IS_FIREFOX, IS_IOS, IS_SAFARI} from 'shared/environment';
+import {
+  IS_APPLE_WEBKIT,
+  IS_FIREFOX,
+  IS_IOS,
+  IS_SAFARI,
+} from 'shared/environment';
 
 // DOM
 export const DOM_ELEMENT_TYPE = 1;
@@ -28,7 +33,7 @@ export const FULL_RECONCILE = 2;
 export const IS_NORMAL = 0;
 export const IS_TOKEN = 1;
 export const IS_SEGMENTED = 2;
-export const IS_INERT = 3;
+// IS_INERT = 3
 
 // Text node formatting
 export const IS_BOLD = 1;
@@ -38,6 +43,7 @@ export const IS_UNDERLINE = 1 << 3;
 export const IS_CODE = 1 << 4;
 export const IS_SUBSCRIPT = 1 << 5;
 export const IS_SUPERSCRIPT = 1 << 6;
+export const IS_HIGHLIGHT = 1 << 7;
 
 export const IS_ALL_FORMATTING =
   IS_BOLD |
@@ -46,7 +52,8 @@ export const IS_ALL_FORMATTING =
   IS_UNDERLINE |
   IS_CODE |
   IS_SUBSCRIPT |
-  IS_SUPERSCRIPT;
+  IS_SUPERSCRIPT |
+  IS_HIGHLIGHT;
 
 // Text node details
 export const IS_DIRECTIONLESS = 1;
@@ -57,6 +64,8 @@ export const IS_ALIGN_LEFT = 1;
 export const IS_ALIGN_CENTER = 2;
 export const IS_ALIGN_RIGHT = 3;
 export const IS_ALIGN_JUSTIFY = 4;
+export const IS_ALIGN_START = 5;
+export const IS_ALIGN_END = 6;
 
 // Reconciliation
 export const NON_BREAKING_SPACE = '\u00A0';
@@ -65,7 +74,9 @@ const ZERO_WIDTH_SPACE = '\u200b';
 // For iOS/Safari we use a non breaking space, otherwise the cursor appears
 // overlapping the composed text.
 export const COMPOSITION_SUFFIX: string =
-  IS_SAFARI || IS_IOS ? NON_BREAKING_SPACE : ZERO_WIDTH_SPACE;
+  IS_SAFARI || IS_IOS || IS_APPLE_WEBKIT
+    ? NON_BREAKING_SPACE
+    : ZERO_WIDTH_SPACE;
 export const DOUBLE_LINE_BREAK = '\n\n';
 
 // For FF, we need to use a non-breaking space, or it gets composition
@@ -87,6 +98,7 @@ export const LTR_REGEX = new RegExp('^[^' + RTL + ']*[' + LTR + ']');
 export const TEXT_TYPE_TO_FORMAT: Record<TextFormatType | string, number> = {
   bold: IS_BOLD,
   code: IS_CODE,
+  highlight: IS_HIGHLIGHT,
   italic: IS_ITALIC,
   strikethrough: IS_STRIKETHROUGH,
   subscript: IS_SUBSCRIPT,
@@ -104,27 +116,29 @@ export const ELEMENT_TYPE_TO_FORMAT: Record<
   number
 > = {
   center: IS_ALIGN_CENTER,
+  end: IS_ALIGN_END,
   justify: IS_ALIGN_JUSTIFY,
   left: IS_ALIGN_LEFT,
   right: IS_ALIGN_RIGHT,
+  start: IS_ALIGN_START,
 };
 
 export const ELEMENT_FORMAT_TO_TYPE: Record<number, ElementFormatType> = {
   [IS_ALIGN_CENTER]: 'center',
+  [IS_ALIGN_END]: 'end',
   [IS_ALIGN_JUSTIFY]: 'justify',
   [IS_ALIGN_LEFT]: 'left',
   [IS_ALIGN_RIGHT]: 'right',
+  [IS_ALIGN_START]: 'start',
 };
 
-export const TEXT_MODE_TO_TYPE: Record<TextModeType, 0 | 1 | 2 | 3> = {
-  inert: IS_INERT,
+export const TEXT_MODE_TO_TYPE: Record<TextModeType, 0 | 1 | 2> = {
   normal: IS_NORMAL,
   segmented: IS_SEGMENTED,
   token: IS_TOKEN,
 };
 
 export const TEXT_TYPE_TO_MODE: Record<number, TextModeType> = {
-  [IS_INERT]: 'inert',
   [IS_NORMAL]: 'normal',
   [IS_SEGMENTED]: 'segmented',
   [IS_TOKEN]: 'token',

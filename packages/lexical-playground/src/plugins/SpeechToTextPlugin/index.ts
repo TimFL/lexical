@@ -21,7 +21,9 @@ import {useEffect, useRef, useState} from 'react';
 
 import useReport from '../../hooks/useReport';
 
-export const SPEECH_TO_TEXT_COMMAND: LexicalCommand<boolean> = createCommand();
+export const SPEECH_TO_TEXT_COMMAND: LexicalCommand<boolean> = createCommand(
+  'SPEECH_TO_TEXT_COMMAND',
+);
 
 const VOICE_COMMANDS: Readonly<
   Record<
@@ -47,7 +49,7 @@ function SpeechToTextPlugin(): null {
   const [editor] = useLexicalComposerContext();
   const [isEnabled, setIsEnabled] = useState<boolean>(false);
   const SpeechRecognition =
-    // @ts-ignore
+    // @ts-expect-error missing type
     window.SpeechRecognition || window.webkitSpeechRecognition;
   const recognition = useRef<typeof SpeechRecognition | null>(null);
   const report = useReport();

@@ -6,6 +6,7 @@
  *
  */
 
+import * as React from 'react';
 import {
   ReactNode,
   useCallback,
@@ -14,7 +15,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import * as React from 'react';
 import {createPortal} from 'react-dom';
 
 type DropDownContextType = {
@@ -22,6 +22,8 @@ type DropDownContextType = {
 };
 
 const DropDownContext = React.createContext<DropDownContextType | null>(null);
+
+const dropDownPadding = 4;
 
 export function DropDownItem({
   children,
@@ -51,7 +53,12 @@ export function DropDownItem({
   }, [ref, registerItem]);
 
   return (
-    <button className={className} onClick={onClick} ref={ref} title={title}>
+    <button
+      className={className}
+      onClick={onClick}
+      ref={ref}
+      title={title}
+      type="button">
       {children}
     </button>
   );
@@ -78,7 +85,9 @@ function DropDownItems({
   );
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!items) return;
+    if (!items) {
+      return;
+    }
 
     const key = event.key;
 
@@ -90,13 +99,17 @@ function DropDownItems({
       onClose();
     } else if (key === 'ArrowUp') {
       setHighlightedItem((prev) => {
-        if (!prev) return items[0];
+        if (!prev) {
+          return items[0];
+        }
         const index = items.indexOf(prev) - 1;
         return items[index === -1 ? items.length - 1 : index];
       });
     } else if (key === 'ArrowDown') {
       setHighlightedItem((prev) => {
-        if (!prev) return items[0];
+        if (!prev) {
+          return items[0];
+        }
         return items[items.indexOf(prev) + 1];
       });
     }
@@ -129,6 +142,7 @@ function DropDownItems({
 }
 
 export default function DropDown({
+  disabled = false,
   buttonLabel,
   buttonAriaLabel,
   buttonClassName,
@@ -136,6 +150,7 @@ export default function DropDown({
   children,
   stopCloseOnClickSelf,
 }: {
+  disabled?: boolean;
   buttonAriaLabel?: string;
   buttonClassName: string;
   buttonIconClassName?: string;
@@ -160,7 +175,7 @@ export default function DropDown({
 
     if (showDropDown && button !== null && dropDown !== null) {
       const {top, left} = button.getBoundingClientRect();
-      dropDown.style.top = `${top + 40}px`;
+      dropDown.style.top = `${top + button.offsetHeight + dropDownPadding}px`;
       dropDown.style.left = `${Math.min(
         left,
         window.innerWidth - dropDown.offsetWidth - 20,
@@ -178,8 +193,9 @@ export default function DropDown({
           if (
             dropDownRef.current &&
             dropDownRef.current.contains(target as Node)
-          )
+          ) {
             return;
+          }
         }
         if (!button.contains(target as Node)) {
           setShowDropDown(false);
@@ -193,9 +209,33 @@ export default function DropDown({
     }
   }, [dropDownRef, buttonRef, showDropDown, stopCloseOnClickSelf]);
 
+  useEffect(() => {
+    const handleButtonPositionUpdate = () => {
+      if (showDropDown) {
+        const button = buttonRef.current;
+        const dropDown = dropDownRef.current;
+        if (button !== null && dropDown !== null) {
+          const {top} = button.getBoundingClientRect();
+          const newPosition = top + button.offsetHeight + dropDownPadding;
+          if (newPosition !== dropDown.getBoundingClientRect().top) {
+            dropDown.style.top = `${newPosition}px`;
+          }
+        }
+      }
+    };
+
+    document.addEventListener('scroll', handleButtonPositionUpdate);
+
+    return () => {
+      document.removeEventListener('scroll', handleButtonPositionUpdate);
+    };
+  }, [buttonRef, dropDownRef, showDropDown]);
+
   return (
     <>
       <button
+        type="button"
+        disabled={disabled}
         aria-label={buttonAriaLabel || buttonLabel}
         className={buttonClassName}
         onClick={() => setShowDropDown(!showDropDown)}

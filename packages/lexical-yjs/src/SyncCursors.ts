@@ -7,14 +7,7 @@
  */
 
 import type {Binding} from './Bindings';
-import type {
-  GridSelection,
-  NodeKey,
-  NodeMap,
-  NodeSelection,
-  Point,
-  RangeSelection,
-} from 'lexical';
+import type {BaseSelection, NodeKey, NodeMap, Point} from 'lexical';
 import type {AbsolutePosition, RelativePosition} from 'yjs';
 
 import {createDOMRange, createRectsFromDOMRange} from '@lexical/selection';
@@ -22,15 +15,18 @@ import {
   $getNodeByKey,
   $getSelection,
   $isElementNode,
+  $isLineBreakNode,
   $isRangeSelection,
+  $isTextNode,
 } from 'lexical';
-import {WebsocketProvider} from 'y-websocket';
+import invariant from 'shared/invariant';
 import {
   compareRelativePositions,
   createAbsolutePositionFromRelativePosition,
   createRelativePositionFromTypeIndex,
 } from 'yjs';
 
+import {Provider} from '.';
 import {CollabDecoratorNode} from './CollabDecoratorNode';
 import {CollabElementNode} from './CollabElementNode';
 import {CollabLineBreakNode} from './CollabLineBreakNode';
@@ -80,6 +76,24 @@ function createRelativePosition(
     }
 
     offset = currentOffset + 1 + offset;
+  } else if (
+    collabNode instanceof CollabElementNode &&
+    point.type === 'element'
+  ) {
+    const parent = point.getNode();
+    invariant($isElementNode(parent), 'Element point must be an element node');
+    let accumulatedOffset = 0;
+    let i = 0;
+    let node = parent.getFirstChild();
+    while (node !== null && i++ < offset) {
+      if ($isTextNode(node)) {
+        accumulatedOffset += node.getTextContentSize() + 1;
+      } else {
+        accumulatedOffset++;
+      }
+      node = node.getNextSibling();
+    }
+    offset = accumulatedOffset;
   }
 
   return createRelativePositionFromTypeIndex(sharedType, offset);
@@ -148,10 +162,10 @@ function createCursorSelection(
 ): CursorSelection {
   const color = cursor.color;
   const caret = document.createElement('span');
-  caret.style.cssText = `position:absolute;top:0;bottom:0;right:-1px;width:1px;background-color:rgb(${color});z-index:10;`;
+  caret.style.cssText = `position:absolute;top:0;bottom:0;right:-1px;width:1px;background-color:${color};z-index:10;`;
   const name = document.createElement('span');
   name.textContent = cursor.name;
-  name.style.cssText = `position:absolute;left:-2px;top:-16px;background-color:rgb(${color});color:#fff;line-height:12px;height:12px;font-size:12px;padding:2px;font-family:Arial;font-weight:bold;white-space:nowrap;`;
+  name.style.cssText = `position:absolute;left:-2px;top:-16px;background-color:${color};color:#fff;line-height:12px;font-size:12px;padding:2px;font-family:Arial;font-weight:bold;white-space:nowrap;`;
   caret.appendChild(name);
   return {
     anchor: {
@@ -183,6 +197,12 @@ function updateCursor(
     return;
   }
 
+  const cursorsContainerOffsetParent = cursorsContainer.offsetParent;
+  if (cursorsContainerOffsetParent === null) {
+    return;
+  }
+
+  const containerRect = cursorsContainerOffsetParent.getBoundingClientRect();
   const prevSelection = cursor.selection;
 
   if (nextSelection === null) {
@@ -210,21 +230,34 @@ function updateCursor(
   if (anchorNode == null || focusNode == null) {
     return;
   }
+  let selectionRects: Array<DOMRect>;
 
-  const range = createDOMRange(
-    editor,
-    anchorNode,
-    anchor.offset,
-    focusNode,
-    focus.offset,
-  );
+  // In the case of a collapsed selection on a linebreak, we need
+  // to improvise as the browser will return nothing here as <br>
+  // apparantly take up no visual space :/
+  // This won't work in all cases, but it's better than just showing
+  // nothing all the time.
+  if (anchorNode === focusNode && $isLineBreakNode(anchorNode)) {
+    const brRect = (
+      editor.getElementByKey(anchorKey) as HTMLElement
+    ).getBoundingClientRect();
+    selectionRects = [brRect];
+  } else {
+    const range = createDOMRange(
+      editor,
+      anchorNode,
+      anchor.offset,
+      focusNode,
+      focus.offset,
+    );
 
-  if (range === null) {
-    return;
+    if (range === null) {
+      return;
+    }
+    selectionRects = createRectsFromDOMRange(editor, range);
   }
 
   const selectionsLength = selections.length;
-  const selectionRects = createRectsFromDOMRange(editor, range);
   const selectionRectsLength = selectionRects.length;
 
   for (let i = 0; i < selectionRectsLength; i++) {
@@ -234,11 +267,19 @@ function updateCursor(
     if (selection === undefined) {
       selection = document.createElement('span');
       selections[i] = selection;
+      const selectionBg = document.createElement('span');
+      selection.appendChild(selectionBg);
       cursorsContainer.appendChild(selection);
     }
 
-    const style = `position:absolute;top:${selectionRect.top}px;left:${selectionRect.left}px;height:${selectionRect.height}px;width:${selectionRect.width}px;background-color:rgba(${color}, 0.3);pointer-events:none;z-index:5;`;
+    const top = selectionRect.top - containerRect.top;
+    const left = selectionRect.left - containerRect.left;
+    const style = `position:absolute;top:${top}px;left:${left}px;height:${selectionRect.height}px;width:${selectionRect.width}px;pointer-events:none;z-index:5;`;
     selection.style.cssText = style;
+
+    (
+      selection.firstChild as HTMLSpanElement
+    ).style.cssText = `${style}left:0;top:0;background-color:${color};opacity:0.3;`;
 
     if (i === selectionRectsLength - 1) {
       if (caret.parentNode !== selection) {
@@ -254,9 +295,9 @@ function updateCursor(
   }
 }
 
-export function syncLocalCursorPosition(
+export function $syncLocalCursorPosition(
   binding: Binding,
-  provider: WebsocketProvider,
+  provider: Provider,
 ): void {
   const awareness = provider.awareness;
   const localState = awareness.getLocalState();
@@ -291,29 +332,30 @@ export function syncLocalCursorPosition(
         if (!$isRangeSelection(selection)) {
           return;
         }
-
         const anchor = selection.anchor;
         const focus = selection.focus;
 
-        if (anchor.key !== anchorKey || anchor.offset !== anchorOffset) {
-          const anchorNode = $getNodeByKey(anchorKey);
-          selection.anchor.set(
-            anchorKey,
-            anchorOffset,
-            $isElementNode(anchorNode) ? 'element' : 'text',
-          );
-        }
-
-        if (focus.key !== focusKey || focus.offset !== focusOffset) {
-          const focusNode = $getNodeByKey(focusKey);
-          selection.focus.set(
-            focusKey,
-            focusOffset,
-            $isElementNode(focusNode) ? 'element' : 'text',
-          );
-        }
+        $setPoint(anchor, anchorKey, anchorOffset);
+        $setPoint(focus, focusKey, focusOffset);
       }
     }
+  }
+}
+
+function $setPoint(point: Point, key: NodeKey, offset: number): void {
+  if (point.key !== key || point.offset !== offset) {
+    let anchorNode = $getNodeByKey(key);
+    if (
+      anchorNode !== null &&
+      !$isElementNode(anchorNode) &&
+      !$isTextNode(anchorNode)
+    ) {
+      const parent = anchorNode.getParentOrThrow();
+      key = parent.getKey();
+      offset = anchorNode.getIndexWithinParent();
+      anchorNode = parent;
+    }
+    point.set(key, offset, $isElementNode(anchorNode) ? 'element' : 'text');
   }
 }
 
@@ -356,7 +398,7 @@ function getCollabNodeAndOffset(
 
 export function syncCursorPositions(
   binding: Binding,
-  provider: WebsocketProvider,
+  provider: Provider,
 ): void {
   const awarenessStates = Array.from(provider.awareness.getStates());
   const localClientID = binding.clientID;
@@ -442,9 +484,9 @@ export function syncCursorPositions(
 
 export function syncLexicalSelectionToYjs(
   binding: Binding,
-  provider: WebsocketProvider,
-  prevSelection: null | RangeSelection | NodeSelection | GridSelection,
-  nextSelection: null | RangeSelection | NodeSelection | GridSelection,
+  provider: Provider,
+  prevSelection: null | BaseSelection,
+  nextSelection: null | BaseSelection,
 ): void {
   const awareness = provider.awareness;
   const localState = awareness.getLocalState();
@@ -459,6 +501,7 @@ export function syncLexicalSelectionToYjs(
     name,
     color,
     focusing,
+    awarenessData,
   } = localState;
   let anchorPos = null;
   let focusPos = null;
@@ -482,7 +525,9 @@ export function syncLexicalSelectionToYjs(
     shouldUpdatePosition(currentFocusPos, focusPos)
   ) {
     awareness.setLocalState({
+      ...localState,
       anchorPos,
+      awarenessData,
       color,
       focusPos,
       focusing,

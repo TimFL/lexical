@@ -13,9 +13,11 @@ import './StickyNode.css';
 import {useCollaborationContext} from '@lexical/react/LexicalCollaborationContext';
 import {CollaborationPlugin} from '@lexical/react/LexicalCollaborationPlugin';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
+import {LexicalErrorBoundary} from '@lexical/react/LexicalErrorBoundary';
 import {HistoryPlugin} from '@lexical/react/LexicalHistoryPlugin';
 import {LexicalNestedComposer} from '@lexical/react/LexicalNestedComposer';
 import {PlainTextPlugin} from '@lexical/react/LexicalPlainTextPlugin';
+import {calculateZoomLevel} from '@lexical/utils';
 import {$getNodeByKey} from 'lexical';
 import * as React from 'react';
 import {useEffect, useRef} from 'react';
@@ -25,7 +27,6 @@ import {createWebsocketProvider} from '../collaboration';
 import {useSharedHistoryContext} from '../context/SharedHistoryContext';
 import StickyEditorTheme from '../themes/StickyEditorTheme';
 import ContentEditable from '../ui/ContentEditable';
-import Placeholder from '../ui/Placeholder';
 import {$isStickyNode} from './StickyNode';
 
 type Positioning = {
@@ -145,13 +146,16 @@ export default function StickyComponent({
     const stickyContainer = stickyContainerRef.current;
     const positioning = positioningRef.current;
     const rootElementRect = positioning.rootElementRect;
+    const zoom = calculateZoomLevel(stickyContainer);
     if (
       stickyContainer !== null &&
       positioning.isDragging &&
       rootElementRect !== null
     ) {
-      positioning.x = event.pageX - positioning.offsetX - rootElementRect.left;
-      positioning.y = event.pageY - positioning.offsetY - rootElementRect.top;
+      positioning.x =
+        event.pageX / zoom - positioning.offsetX - rootElementRect.left;
+      positioning.y =
+        event.pageY / zoom - positioning.offsetY - rootElementRect.top;
       positionSticky(stickyContainer, positioning);
     }
   };
@@ -211,8 +215,9 @@ export default function StickyComponent({
           const positioning = positioningRef.current;
           if (stickContainer !== null) {
             const {top, left} = stickContainer.getBoundingClientRect();
-            positioning.offsetX = event.clientX - left;
-            positioning.offsetY = event.clientY - top;
+            const zoom = calculateZoomLevel(stickContainer);
+            positioning.offsetX = event.clientX / zoom - left;
+            positioning.offsetY = event.clientY / zoom - top;
             positioning.isDragging = true;
             stickContainer.classList.add('dragging');
             document.addEventListener('pointermove', handlePointerMove);
@@ -248,15 +253,13 @@ export default function StickyComponent({
           )}
           <PlainTextPlugin
             contentEditable={
-              <ContentEditable className="StickyNode__contentEditable" />
+              <ContentEditable
+                placeholder="What's up?"
+                placeholderClassName="StickyNode__placeholder"
+                className="StickyNode__contentEditable"
+              />
             }
-            placeholder={
-              <Placeholder className="StickyNode__placeholder">
-                What's up?
-              </Placeholder>
-            }
-            // TODO Remove after it's inherited from the parent (LexicalComposer)
-            initialEditorState={null}
+            ErrorBoundary={LexicalErrorBoundary}
           />
         </LexicalNestedComposer>
       </div>

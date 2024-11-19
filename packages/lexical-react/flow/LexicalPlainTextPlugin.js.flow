@@ -9,6 +9,10 @@
 
 import type {EditorState, LexicalEditor} from 'lexical';
 
+import {typeof LexicalErrorBoundary} from '@lexical/react/LexicalErrorBoundary';
+
+import * as React from 'react';
+
 type InitialEditorStateType =
   | null
   | string
@@ -17,6 +21,9 @@ type InitialEditorStateType =
 
 declare export function PlainTextPlugin({
   contentEditable: React$Node,
-  initialEditorState?: InitialEditorStateType,
-  placeholder: React$Node,
+  placeholder?:
+  | ((isEditable: boolean) => null | React$Node)
+  | null
+  | React$Node;
+  ErrorBoundary: LexicalErrorBoundary,
 }): React$Node;
